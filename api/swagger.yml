@@ -1,0 +1,61 @@
+openapi: 3.0.0
+info:
+  title: Portal Kolab API
+  description: Backend API for Portal Kolab
+  version: 1.0.0
+servers:
+  - url: https://api-portal.kolab.top/api
+    description: Production server
+paths:
+  /health:
+    get:
+      summary: Health check
+      responses:
+        '200':
+          description: OK
+  /auth/login:
+    post:
+      summary: User login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                username:
+                  type: string
+                password:
+                  type: string
+                isAdmin:
+                  type: boolean
+                role:
+                  type: string
+                id:
+                  type: string
+      responses:
+        '200':
+          description: OK
+  /data/assets:
+    get:
+      summary: Get system assets
+      responses:
+        '200':
+          description: OK
+  /ai/generate:
+    post:
+      summary: Generate content using AI
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                prompt:
+                  type: string
+                model:
+                  type: string
+      responses:
+        '200':
+          description: OK

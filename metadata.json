@@ -1,0 +1,7 @@
+{
+  "name": "Portal Kolab",
+  "description": "A comprehensive collaborative portal for Kolab members (students and lecturers) to manage profiles, track schedules, discover events, and broadcast targeted announcements.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
