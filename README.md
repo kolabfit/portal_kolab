@@ -101,3 +101,19 @@ ke `integration_results`; generasi AI langsung belum dicakup pengujian provider.
 Operasi tulis bridge, photobooth, migrasi, dan AI memerlukan token Bearer.
 Pengaturan global dan pengelolaan anggota memerlukan peran ADMIN. URL file bersifat
 shareable dan menggunakan ID acak, sesuai fungsi preview/download portal.
+
+## Kelola Magang (ADMIN)
+
+Buka **Management User > Kelola Magang** untuk tambah, edit, hapus, cari mahasiswa,
+filter startup/status, dan refresh. Mahasiswa serta pembimbing akademik dipilih dari
+User Directory; startup dipilih dari Startup Cluster. Status disimpan di MySQL.
+
+Jalankan `npm --prefix api run db:migrate` lalu restart backend untuk database
+existing. Migrasi dapat diulang tanpa menghapus record magang. Endpoint
+`GET /api/data/internships` dan bridge `manageInternship` hanya menerima JWT ADMIN.
+
+Status aktif `PLANNED` dan `ONGOING` tidak boleh memiliki periode bertabrakan untuk
+mahasiswa yang sama, termasuk ketika tanggal selesai sama dengan tanggal mulai
+record lain. `COMPLETED` dan `CANCELLED` tetap dapat dicatat sebagai riwayat.
+
+Laporan perubahan dan hasil pengujian: [IMPLEMENTATION-MAGANG.md](IMPLEMENTATION-MAGANG.md).

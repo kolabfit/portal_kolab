@@ -6,6 +6,7 @@ import { requireSession } from '../lib/session.js';
 import { record } from '../lib/serializers.js';
 import { saveProfile } from '../lib/profile.js';
 import { repositoryActions, repositoryAction } from '../lib/repository.js';
+import { manageInternship } from '../lib/internships.js';
 
 const router = express.Router();
 const GAS_URL = process.env.GAS_URL;
@@ -22,19 +23,24 @@ async function proxyToGas(payload, action) {
 router.post('/', requireSession, async (req, res) => {
   const payload = req.body || {};
   const { action, type } = payload;
-  const id = payload.id || (type === 'add' || action === 'addAnnouncement' ? generatedId('item') : undefined);
+  const id = payload.id || (type === 'add' || action === 'addAnnouncement' ? generatedId(action === 'manageInternship' ? 'internship' : 'item') : undefined);
   let data = payload.data || (action === 'updateAssets' ? payload : {});
 
   let db;
   try {
     if (repositoryActions.includes(action)) return res.json(await repositoryAction(req));
-    const adminActions = ['getAllMembers', 'manageMember', 'updateMemberStorage', 'manageStartup', 'updateAssets', 'manageCategory', 'manageYPlaylist', 'yplaylistAction', 'manageTvLive', 'tvliveAction'];
+    const adminActions = ['getAllMembers', 'manageMember', 'bulkManageMembers', 'manageInternshipsBulk', 'updateMemberStorage', 'manageStartup', 'updateAssets', 'manageCategory', 'manageYPlaylist', 'yplaylistAction', 'manageTvLive', 'tvliveAction', 'manageInternship'];
     if (adminActions.includes(action) && req.user.role !== 'ADMIN') return res.status(403).json({ status: 'error', message: 'Akses admin diperlukan.' });
     db = await pool.getConnection();
     await db.beginTransaction();
     const success = async result => {
       if (action !== 'getAllMembers') {
-        await db.execute('INSERT INTO system_logs (timestamp,action,user_id,details) VALUES (NOW(),?,?,?)', [action, req.user.id, JSON.stringify({ id: id || payload.targetId || null, type })]);
+        await db.execute('INSERT INTO system_logs (timestamp,action,user_id,details) VALUES (NOW(),?,?,?)', [action, req.user.id, JSON.stringify({
+          id: id || payload.targetId || null,
+          type,
+          bulkAction: action === 'bulkManageMembers' ? payload.bulkAction : undefined,
+          requested: action === 'bulkManageMembers' && Array.isArray(payload.members) ? payload.members.length : undefined
+        })]);
         const notificationType = { manageSchedule: 'SCHEDULE', scheduleAction: 'SCHEDULE', manageInformasi: 'INFO', addAnnouncement: 'ANNOUNCEMENT' }[action];
         if (notificationType && (type === 'add' || action === 'addAnnouncement')) await db.execute('INSERT INTO notifications (id,type,title,message,timestamp) VALUES (?,?,?,?,NOW())', [crypto.randomUUID(), notificationType, 'Pembaruan portal', 'Konten baru tersedia di portal.']);
       }
@@ -57,21 +63,98 @@ router.post('/', requireSession, async (req, res) => {
     }
     if (data.date) data.date = String(data.date).replace('T', ' ').replace(/Z$/, '').slice(0, 19);
     switch (action) {
+      case 'manageInternship':
+        await manageInternship(db, type, id, data);
+        return await success({ status: 'success', id });
+
+      case 'manageInternshipsBulk': {
+        const operation = String(payload.operation || '');
+        const rows = Array.isArray(payload.internships) ? payload.internships : [];
+        if (!['create', 'status', 'delete'].includes(operation) || !rows.length || rows.length > 500) {
+          throw Object.assign(new Error('Operasi bulk magang atau data tidak valid.'), { status: 400 });
+        }
+        const seenStudents = new Set();
+        let affected = 0;
+        if (operation === 'create') {
+          for (const row of rows) {
+            if (!row || seenStudents.has(row.studentNim)) throw Object.assign(new Error('Mahasiswa duplicate dalam batch.'), { status: 400 });
+            seenStudents.add(row.studentNim);
+            await manageInternship(db, 'add', generatedId('internship'), row);
+            affected += 1;
+          }
+        } else {
+          for (const row of rows) {
+            const studentNim = String(row.studentNim || '').trim();
+            if (!studentNim || seenStudents.has(studentNim)) throw Object.assign(new Error('Mahasiswa duplicate atau tidak valid.'), { status: 400 });
+            seenStudents.add(studentNim);
+            const [[internship]] = await db.execute(`SELECT id FROM internships WHERE student_nim=?
+              ORDER BY CASE status WHEN 'ONGOING' THEN 0 WHEN 'PLANNED' THEN 1 WHEN 'COMPLETED' THEN 2 ELSE 3 END,
+              start_date DESC, created_at DESC, id DESC LIMIT 1 FOR UPDATE`, [studentNim]);
+            if (!internship) throw Object.assign(new Error(`Data magang tidak ditemukan untuk ${studentNim}.`), { status: 400 });
+            if (operation === 'status') {
+              if (!['PLANNED', 'ONGOING', 'COMPLETED', 'CANCELLED'].includes(row.status)) throw Object.assign(new Error('Status magang tidak valid.'), { status: 400 });
+              await db.execute('UPDATE internships SET status=? WHERE id=?', [row.status, internship.id]);
+            } else {
+              await db.execute('DELETE FROM internships WHERE id=?', [internship.id]);
+            }
+            affected += 1;
+          }
+        }
+        return await success({ status: 'success', operation, affected, requested: rows.length });
+      }
+
       case 'getAllMembers': {
-        const [students] = await db.execute('SELECT * FROM students ORDER BY created_at DESC');
+        const [students] = await db.execute(`SELECT s.*, i.id AS internship_id, i.startup_id AS internship_startup_id,
+          i.status AS internship_status, i.start_date AS internship_start_date, i.end_date AS internship_end_date,
+          it.name AS internship_startup_name
+          FROM students s
+          LEFT JOIN internships i ON i.id = (
+            SELECT latest.id FROM internships latest
+            WHERE latest.student_nim = s.nim
+            ORDER BY CASE latest.status WHEN 'ONGOING' THEN 0 WHEN 'PLANNED' THEN 1 WHEN 'COMPLETED' THEN 2 ELSE 3 END,
+              latest.start_date DESC, latest.created_at DESC, latest.id DESC LIMIT 1
+          )
+          LEFT JOIN startup_teams it ON it.id = i.startup_id
+          ORDER BY s.created_at DESC`);
         const [lecturers] = await db.execute('SELECT * FROM lecturers ORDER BY created_at DESC');
+        let workloadStats = [];
+        try {
+          [workloadStats] = await db.execute(`SELECT member_id, member_role,
+          SUM(w.status='ACTIVE') AS active_load, COUNT(*) AS total_history,
+          SUM(w.status='ACTIVE' AND w.category='PKM') AS pkm_load,
+          SUM(w.status='ACTIVE' AND w.category='PROJECT') AS project_load,
+          SUM(w.status='ACTIVE' AND w.category='RESEARCH') AS research_load,
+          SUM(w.status='ACTIVE' AND w.category='COMPETITION') AS competition_load
+          FROM workload_members wm JOIN workloads w ON w.id=wm.workload_id
+          GROUP BY member_id, member_role`);
+        } catch (error) {
+          if (error.code !== 'ER_NO_SUCH_TABLE') throw error;
+        }
+        const workloadMap = new Map(workloadStats.map(row => [`${row.member_role}:${row.member_id}`, {
+          activeLoad: Number(row.active_load || 0), totalHistory: Number(row.total_history || 0),
+          categoryLoad: { PKM: Number(row.pkm_load || 0), PROJECT: Number(row.project_load || 0), RESEARCH: Number(row.research_load || 0), COMPETITION: Number(row.competition_load || 0) }
+        }]));
         return await success([
           ...students.map(user => ({
             studentId: user.nim, name: user.name, email: user.email, avatar: user.avatar, role: 'STUDENT',
             studentType: user.type, customQuota: user.custom_quota, customMaxUpload: user.custom_max_upload,
             startupId: user.startup_id, studentJobDesk: user.job_desk,
-            isApproved: !!user.is_approved, isActive: !!user.is_active
+            isIntern: !!user.internship_id,
+            internshipId: user.internship_id || null,
+            internshipStatus: user.internship_status || null,
+            internshipStartupId: user.internship_startup_id || null,
+            internshipStartupName: user.internship_startup_name || null,
+            internshipStartDate: user.internship_start_date || null,
+            internshipEndDate: user.internship_end_date || null,
+            isApproved: !!user.is_approved, isActive: !!user.is_active,
+            workload: workloadMap.get(`STUDENT:${user.nim}`) || { activeLoad: 0, totalHistory: 0, categoryLoad: { PKM: 0, PROJECT: 0, RESEARCH: 0, COMPETITION: 0 } }
           })),
           ...lecturers.map(user => ({
             studentId: user.nip, name: user.name, email: user.email, avatar: user.avatar,
             role: 'LECTURER', lecturerCode: user.code, customQuota: user.custom_quota, customMaxUpload: user.custom_max_upload,
             lecturerJobDesks: JSON.parse(user.job_desks || '[]'),
-            isApproved: !!user.is_approved, isActive: !!user.is_active
+            isApproved: !!user.is_approved, isActive: !!user.is_active,
+            workload: workloadMap.get(`LECTURER:${user.nip}`) || { activeLoad: 0, totalHistory: 0, categoryLoad: { PKM: 0, PROJECT: 0, RESEARCH: 0, COMPETITION: 0 } }
           }))
         ]);
       }
@@ -106,6 +189,53 @@ router.post('/', requireSession, async (req, res) => {
           return res.status(400).json({ status: 'error', message: 'Operasi member tidak valid.' });
         }
         return await success({ status: 'success', id });
+      }
+
+      case 'bulkManageMembers': {
+        const actionType = String(payload.bulkAction || '');
+        const selectedMembers = Array.isArray(payload.members) ? payload.members : [];
+        const allowedActions = ['approve', 'unapprove', 'activate', 'deactivate', 'delete', 'edit'];
+        if (!allowedActions.includes(actionType) || selectedMembers.length === 0 || selectedMembers.length > 500) {
+          throw Object.assign(new Error('Aksi bulk atau daftar member tidak valid.'), { status: 400 });
+        }
+        let affected = 0;
+        for (const member of selectedMembers) {
+          if (!['STUDENT', 'LECTURER'].includes(member.role) || !member.id) {
+            throw Object.assign(new Error('Identitas member tidak valid.'), { status: 400 });
+          }
+          const table = member.role === 'STUDENT' ? 'students' : 'lecturers';
+          const idField = member.role === 'STUDENT' ? 'nim' : 'nip';
+          let result;
+          if (actionType === 'edit') {
+            const data = payload.data && typeof payload.data === 'object' ? { ...payload.data } : {};
+            delete data.nim;
+            delete data.nip;
+            delete data.role;
+            if (data.password === '') delete data.password;
+            if (member.role === 'STUDENT' && data.studentType === 'STARTUP') {
+              if (!data.startupId) {
+                const [[currentStudent]] = await db.execute('SELECT startup_id FROM students WHERE nim=?', [member.id]);
+                data.startupId = currentStudent?.startup_id || '';
+              }
+              const [[startup]] = await db.execute('SELECT id FROM startup_teams WHERE id=? OR LOWER(name)=LOWER(?) LIMIT 1', [data.startupId || '', data.startupId || '']);
+              if (!startup) throw Object.assign(new Error(`Startup tidak ditemukan untuk ${member.id}.`), { status: 400 });
+              data.startupId = startup.id;
+            }
+            if (member.role === 'STUDENT' && data.studentType === 'NON_STARTUP') data.startupId = null;
+            await saveProfile(db, member.role, member.id, data, true);
+            affected += 1;
+            continue;
+          }
+          if (actionType === 'delete') {
+            [result] = await db.execute(`DELETE FROM ${table} WHERE ${idField}=?`, [member.id]);
+          } else {
+            const field = actionType === 'approve' || actionType === 'unapprove' ? 'is_approved' : 'is_active';
+            const value = ['approve', 'activate'].includes(actionType) ? 1 : 0;
+            [result] = await db.execute(`UPDATE ${table} SET ${field}=? WHERE ${idField}=?`, [value, member.id]);
+          }
+          affected += result.affectedRows || 0;
+        }
+        return await success({ status: 'success', affected, requested: selectedMembers.length });
       }
 
       case 'updateMemberStorage': {

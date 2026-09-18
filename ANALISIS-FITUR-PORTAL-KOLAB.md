@@ -592,3 +592,25 @@ Portal Kolab memiliki tiga tingkat akses utama:
 - Admin: akses seluruh fitur portal, administrasi anggota, startup, content hub, assets, dan pengelolaan global.
 
 Alur utama aplikasi sudah terhubung ke backend Node.js dan MySQL. Operasi CRUD inti telah diverifikasi melalui suite persistence dengan 17 test berhasil. Google Apps Script berfungsi sebagai integrasi eksternal untuk repository/provider dan Google Meet, bukan sebagai database utama akun dan konten portal.
+## Implementasi Import/Export Member (Admin)
+
+Fitur transfer data member telah ditambahkan pada User Directory untuk role `ADMIN`.
+
+- Backend baru: `api/routes/memberTransfer.js`, didaftarkan pada `/api/admin/members`.
+- Frontend: `views/MemberManagementView.tsx` menyediakan Import Data dan Export Data tanpa mengubah tab Startup Cluster maupun Kelola Magang.
+- API frontend: `api.ts` menangani upload multipart, commit import, template, dan download export.
+- Dependency: `multer`, `xlsx`, dan `pdfkit`.
+- Import mendukung `.xlsx`, `.xls`, dan `.csv`, mapping header berbasis alias, preview, validasi identifier/nama/email/quota/status/type/startup, duplicate `skip/update`, transaksi database, serta audit log.
+- Template mahasiswa dan dosen tersedia melalui endpoint `/template/:role`.
+- Export mahasiswa/dosen mendukung Excel dan PDF, filter pencarian aktif, pagination PDF, dan tidak menyertakan password maupun hash password.
+- Semua endpoint menggunakan `requireSession` dan admin guard sehingga unauthenticated menghasilkan `401` dan role non-admin `403`.
+- User Directory juga mendukung bulk action untuk member terpilih: aktifkan, nonaktifkan, setujui, batalkan persetujuan, dan hapus. Proses dibatasi maksimal 500 member per request, menggunakan transaksi bridge yang sama, serta dicatat ke `system_logs`.
+- Bulk action juga memiliki opsi `Edit Detail User` untuk mengubah secara parsial nama, email, password, tipe/startup/job desk mahasiswa, serta kode/job desk dosen. Field kosong tidak mengubah nilai lama, identifier NIM/NIP tidak dapat diubah, dan password tetap di-hash oleh backend.
+- Saat bulk edit routing mahasiswa menjadi `STARTUP`, startup kosong berarti mempertahankan startup masing-masing member. Jika admin ingin menyamakan startup, startup dapat dipilih dari daftar `startup_teams`; backend juga menerima pencocokan nama/ID secara case-insensitive.
+- Import mahasiswa sekarang menerima `startup_id`, `startup`, `startup_name`, `nama startup`, `nama tim`, dan `startup team`. Nilai ID maupun nama startup akan dicocokkan ke `startup_teams`, lalu yang disimpan ke `students.startup_id` adalah ID startup yang sebenarnya. Startup yang tidak ada tetap ditolak agar tidak menghasilkan relasi database yang salah.
+
+Validasi yang telah dijalankan:
+
+- `npm run build` (frontend): berhasil.
+- `node --check routes/memberTransfer.js` dan `server.js` dari direktori `api`: berhasil.
+- `api/npm test`: 65 test passed, 0 failed.

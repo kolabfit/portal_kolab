@@ -129,12 +129,13 @@ router.post('/login', async (req, res) => {
 
 router.post('/register', async (req, res) => {
   const { id, password, name, role, studentType, startupId, studentJobDesk, lecturerCode } = req.body;
-  if (!id || !password || !name || !['STUDENT', 'LECTURER'].includes(role)) {
+  if (!id || !name || !['STUDENT', 'LECTURER'].includes(role)) {
     return res.status(400).json({
       status: 'error',
-      message: 'ID, password, name, and a valid role are required.'
+      message: 'ID, name, and a valid role are required.'
     });
   }
+  const actualPassword = password || (role === 'STUDENT' ? 'memberkolab' : 'dosenkolab');
   if (String(id).length > 20) {
     return res.status(400).json({
       status: 'error',
@@ -144,7 +145,7 @@ router.post('/register', async (req, res) => {
   const isS = role === 'STUDENT';
   const table = isS ? 'students' : 'lecturers';
   const idField = isS ? 'nim' : 'nip';
-  const hashed = sha256(password);
+  const hashed = sha256(actualPassword);
 
   try {
     const [existing] = await db.execute(`SELECT * FROM ${table} WHERE ${idField} = ?`, [id]);

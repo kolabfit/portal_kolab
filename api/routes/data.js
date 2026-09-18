@@ -3,9 +3,16 @@ import db from '../lib/db.js';
 import { record } from '../lib/serializers.js';
 import { listRepository } from '../lib/repository.js';
 import { requireSession } from '../lib/session.js';
+import { listInternships } from '../lib/internships.js';
 
 const router = express.Router();
 const GAS_URL = process.env.GAS_URL;
+
+router.get('/internships', requireSession, async (req, res, next) => {
+  if (req.user.role !== 'ADMIN') return res.status(403).json({ status: 'error', message: 'Akses admin diperlukan.' });
+  res.set('Cache-Control', 'no-store');
+  try { res.json(await listInternships(db)); } catch (error) { next(error); }
+});
 
 // Get Assets
 router.get('/assets', async (req, res) => {

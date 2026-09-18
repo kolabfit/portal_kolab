@@ -242,3 +242,23 @@ CREATE TABLE IF NOT EXISTS file_blobs (
 );
 
 CREATE TABLE IF NOT EXISTS integration_results (id VARCHAR(36) PRIMARY KEY, action VARCHAR(100), user_id VARCHAR(50), request_data LONGTEXT, response_data LONGTEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
+
+-- Magang: indexed references preserve compatibility with existing member/startup deletion.
+CREATE TABLE IF NOT EXISTS internships (
+  id VARCHAR(50) PRIMARY KEY,
+  student_nim VARCHAR(20) NOT NULL,
+  startup_id VARCHAR(50) NOT NULL,
+  start_date DATE NOT NULL,
+  end_date DATE NOT NULL,
+  field_supervisor VARCHAR(150),
+  academic_supervisor_nip VARCHAR(20),
+  academic_supervisor2_nip VARCHAR(20),
+  status VARCHAR(30) NOT NULL DEFAULT 'PLANNED',
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_internships_student (student_nim),
+  INDEX idx_internships_startup (startup_id),
+  INDEX idx_internships_academic (academic_supervisor_nip),
+  INDEX idx_internships_academic2 (academic_supervisor2_nip),
+  INDEX idx_internships_status (status)
+) ENGINE=InnoDB;

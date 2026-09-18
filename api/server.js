@@ -16,6 +16,9 @@ import healthRoutes from './routes/health.js';
 import bridgeRoutes from './routes/bridge.js';
 import migrationRoutes from './routes/migration.js';
 import photoboothRoutes from './routes/photobooth.js';
+import memberTransferRoutes from './routes/memberTransfer.js';
+import internshipTransferRoutes from './routes/internshipTransfer.js';
+import workloadRoutes from './routes/workloads.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -44,6 +47,9 @@ app.use('/api/health', healthRoutes);
 app.use('/api/bridge', bridgeRoutes);
 app.use('/api/migration', migrationRoutes);
 app.use('/api/photobooth', photoboothRoutes);
+app.use('/api/admin/members', memberTransferRoutes);
+app.use('/api/admin/internships', internshipTransferRoutes);
+app.use('/api/workloads', workloadRoutes);
 
 app.get('/', (req, res) => {
   res.send('Portal Kolab API is running');
@@ -52,7 +58,7 @@ app.get('/', (req, res) => {
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error(err.stack);
-  res.status(err.status || 500).json({ status: 'error', message: err.status === 413 ? 'Ukuran upload melebihi batas server.' : 'Something went wrong!' });
+  res.status(err.status || 500).json({ status: 'error', message: err.status === 413 ? 'Ukuran upload melebihi batas server.' : (err.status ? err.message : (process.env.NODE_ENV === 'development' ? err.message : 'Something went wrong!')) });
 });
 
 export default app;

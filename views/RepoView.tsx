@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { RepoItem, UserProfile, GlobalRepoStats, AppAssets, FileCategory, UserRole } from '../types';
 import { api } from '../api';
+import { TablePagination } from '../components/TableControls';
 
 interface RepoViewProps {
   profile: UserProfile;
@@ -27,6 +28,8 @@ const RepoView: React.FC<RepoViewProps> = ({ profile, onShowAlert, isAdmin, asse
   const [search, setSearch] = useState('');
   const [currentFolder, setCurrentFolder] = useState<string>('ROOT');
   const [breadcrumbs, setBreadcrumbs] = useState<{id: string, name: string}[]>([]);
+  const [tablePage, setTablePage] = useState(1);
+  const [tableFilters, setTableFilters] = useState({ descriptor: '', capacity: '' });
   
   // Modal States
   const [showFolderModal, setShowFolderModal] = useState(false);
@@ -104,8 +107,13 @@ const RepoView: React.FC<RepoViewProps> = ({ profile, onShowAlert, isAdmin, asse
 
   const filteredItems = useMemo(() => {
     const term = search.toLowerCase();
-    return displayItems.filter(i => i.name.toLowerCase().includes(term));
-  }, [displayItems, search]);
+    return displayItems.filter(i => i.name.toLowerCase().includes(term))
+      .filter(i => i.name.toLowerCase().includes(tableFilters.descriptor.toLowerCase()))
+      .filter(i => `${i.type === 'FILE' ? formatSize(i.size) : '---'} ${i.type}`.toLowerCase().includes(tableFilters.capacity.toLowerCase()));
+  }, [displayItems, search, tableFilters]);
+  const pagedItems = filteredItems.slice((tablePage - 1) * 10, tablePage * 10);
+  const tableTotalPages = Math.ceil(filteredItems.length / 10);
+  useEffect(() => { setTablePage(1); }, [search, currentFolder, tableFilters, viewMode]);
 
   const handleCreateFolder = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -299,9 +307,14 @@ const RepoView: React.FC<RepoViewProps> = ({ profile, onShowAlert, isAdmin, asse
                         <th className="px-8 py-5 text-left text-[9px] font-black text-slate-400 uppercase tracking-widest">Capacity</th>
                         <th className="px-8 py-5 text-right text-[9px] font-black text-slate-400 uppercase tracking-widest">Action</th>
                      </tr>
+                     <tr className="border-t border-slate-100">
+                        <th className="px-8 py-3"><input aria-label="Filter descriptor" placeholder="Filter..." value={tableFilters.descriptor} onChange={e => setTableFilters(filters => ({ ...filters, descriptor: e.target.value }))} className="w-full px-3 py-2 rounded-xl bg-white text-xs outline-none border border-slate-100" /></th>
+                        <th className="px-8 py-3"><input aria-label="Filter capacity" placeholder="Filter..." value={tableFilters.capacity} onChange={e => setTableFilters(filters => ({ ...filters, capacity: e.target.value }))} className="w-full px-3 py-2 rounded-xl bg-white text-xs outline-none border border-slate-100" /></th>
+                        <th className="px-8 py-3"></th>
+                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-50">
-                     {filteredItems.map(item => (
+                     {pagedItems.map(item => (
                        <tr key={item.id} className="hover:bg-slate-50/30 transition-colors group cursor-pointer" onDoubleClick={() => item.type === 'FOLDER' ? navigateTo(item) : setPreviewItem(item)} onContextMenu={(e) => handleContextMenu(e, item)}>
                           <td className="px-8 py-4">
                              <div className="flex items-center gap-4">
@@ -317,6 +330,7 @@ const RepoView: React.FC<RepoViewProps> = ({ profile, onShowAlert, isAdmin, asse
                      ))}
                   </tbody>
                </table>
+               <TablePagination page={tablePage} totalPages={tableTotalPages} totalRows={filteredItems.length} onPageChange={setTablePage} />
             </div>
           )}
         </div>

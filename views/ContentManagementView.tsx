@@ -7,6 +7,7 @@ import {
 import { Informasi, Schedule, Article, ArticleCategory, StartupTeam } from '../types';
 import { api } from '../api';
 import Modal from '../components/Modal';
+import { TablePagination } from '../components/TableControls';
 
 interface ContentManagementViewProps {
   startups: StartupTeam[];
@@ -24,7 +25,8 @@ const ContentManagementView: React.FC<ContentManagementViewProps> = ({ startups,
   const [sortKey, setSortKey] = useState<string>('');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
   const [currentPage, setCurrentPage] = useState(1);
-  const pageSize = 5;
+  const pageSize = 10;
+  const [columnFilters, setColumnFilters] = useState<Record<string, string>>({});
 
   // Form State
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -51,13 +53,15 @@ const ContentManagementView: React.FC<ContentManagementViewProps> = ({ startups,
   };
 
   useEffect(() => { fetchData(); setCurrentPage(1); }, [activeTab]);
+  useEffect(() => { setCurrentPage(1); }, [columnFilters]);
 
   const sortedData = useMemo(() => {
-    let filtered = data.filter(item => 
-      Object.values(item).some(val => 
-        String(val).toLowerCase().includes(searchTerm.toLowerCase())
-      )
-    );
+    let filtered = data.filter(item => Object.values(item).some(val => String(val).toLowerCase().includes(searchTerm.toLowerCase())))
+      .filter(item => Object.entries(columnFilters).every(([key, value]) => {
+        if (!value) return true;
+        const source = key === 'descriptor' ? (item.title || item.name) : key === 'author' ? (item.author || item.organizer) : item[key];
+        return String(source ?? '').toLowerCase().includes(value.toLowerCase());
+      }));
     if (sortKey) {
       filtered.sort((a, b) => {
         const valA = String(a[sortKey]);
@@ -244,6 +248,12 @@ const ContentManagementView: React.FC<ContentManagementViewProps> = ({ startups,
                 )}
                 <th className="px-8 py-6 text-right text-[10px] font-black text-slate-400 uppercase tracking-widest">Aksi</th>
               </tr>
+              <tr className="bg-white border-b border-slate-100">
+                <th className="px-8 py-3"><input aria-label="Filter descriptor" placeholder="Filter..." value={columnFilters.descriptor || ''} onChange={e => setColumnFilters(f => ({ ...f, descriptor: e.target.value }))} className="w-full px-3 py-2 rounded-xl bg-slate-50 text-xs outline-none" /></th>
+                {activeTab !== 'categories' && <th className="px-8 py-3"><input aria-label="Filter penulis" placeholder="Filter..." value={columnFilters.author || ''} onChange={e => setColumnFilters(f => ({ ...f, author: e.target.value }))} className="w-full px-3 py-2 rounded-xl bg-slate-50 text-xs outline-none" /></th>}
+                {activeTab !== 'categories' && <th className="px-8 py-3"><input aria-label="Filter timeline" placeholder="Filter..." value={columnFilters.date || ''} onChange={e => setColumnFilters(f => ({ ...f, date: e.target.value }))} className="w-full px-3 py-2 rounded-xl bg-slate-50 text-xs outline-none" /></th>}
+                <th className="px-8 py-3"></th>
+              </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {isLoading ? (
@@ -282,15 +292,7 @@ const ContentManagementView: React.FC<ContentManagementViewProps> = ({ startups,
         </div>
 
         {/* Pagination Controls */}
-        {totalPages > 1 && (
-          <div className="px-8 py-6 bg-slate-50/50 border-t border-slate-100 flex items-center justify-between">
-            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Halaman {currentPage} dari {totalPages}</span>
-            <div className="flex gap-2">
-              <button disabled={currentPage === 1} onClick={() => setCurrentPage(p => p - 1)} className="p-3 bg-white rounded-xl border border-slate-200 disabled:opacity-30 transition-all hover:bg-orange-50 hover:border-orange-200"><ChevronLeft size={16} /></button>
-              <button disabled={currentPage === totalPages} onClick={() => setCurrentPage(p => p + 1)} className="p-3 bg-white rounded-xl border border-slate-200 disabled:opacity-30 transition-all hover:bg-orange-50 hover:border-orange-200"><ChevronRight size={16} /></button>
-            </div>
-          </div>
-        )}
+        <TablePagination page={currentPage} totalPages={totalPages} totalRows={sortedData.length} pageSize={pageSize} onPageChange={setCurrentPage} />
       </div>
 
       {/* Entry Editor Modal */}

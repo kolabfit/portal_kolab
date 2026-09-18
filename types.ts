@@ -5,6 +5,26 @@ export enum UserRole {
   ADMIN = 'ADMIN'
 }
 
+export type InternshipStatus = 'PLANNED' | 'ONGOING' | 'COMPLETED' | 'CANCELLED';
+
+export interface Internship {
+  id: string;
+  studentNim: string;
+  studentName: string | null;
+  startupId: string;
+  startupName: string | null;
+  startDate: string;
+  endDate: string;
+  fieldSupervisor: string | null;
+  academicSupervisorNip: string | null;
+  academicSupervisorName: string | null;
+  academicSupervisorCode: string | null;
+  academicSupervisor2Nip: string | null;
+  academicSupervisor2Name: string | null;
+  academicSupervisor2Code: string | null;
+  status: InternshipStatus;
+}
+
 export enum StudentJobDesk {
   ASLAB = 'Asisten Lab',
   PIC = 'PIC Lab',

@@ -2,26 +2,38 @@
 import React, { useEffect, useState } from 'react';
 import { 
   Trash2, Search, Rocket, HardDrive, 
-  Plus, X, Save, UserPlus, Edit3, Loader2, CheckCircle2, UserCircle, Globe, Instagram, Lock, Unlock, Users, ShieldAlert, Fingerprint, BookOpen, User, Filter, Briefcase, Building2, RefreshCw
+  Plus, X, Save, UserPlus, Edit3, Loader2, CheckCircle2, UserCircle, Globe, Instagram, Lock, Unlock, Users, ShieldAlert, Fingerprint, BookOpen, User, Filter, Briefcase, Building2, RefreshCw, Upload, Download, FileSpreadsheet, FileText, ListChecks
 } from 'lucide-react';
 import { api } from '../api';
 import { StartupTeam, UserRole, UserProfile, StudentJobDesk } from '../types';
 import DropZone from '../components/DropZone';
+import InternshipManagement from '../components/InternshipManagement';
+import WorkloadManagement from '../components/WorkloadManagement';
+import { TablePagination } from '../components/TableControls';
 
 interface MemberManagementViewProps {
+  userRole: UserRole;
   startups: StartupTeam[];
   onRefresh?: () => void;
   onShowAlert: (title: string, msg: string, type: any) => void;
   showConfirm: (title: string, message: string, onConfirm: () => void) => void;
 }
 
-const MemberManagementView: React.FC<MemberManagementViewProps> = ({ startups, onRefresh, onShowAlert, showConfirm }) => {
+type TransferRole = 'STUDENT' | 'LECTURER';
+type TransferFormat = 'xlsx' | 'pdf';
+type ImportStep = 'select' | 'preview' | 'result';
+type BulkAction = 'approve' | 'unapprove' | 'activate' | 'deactivate' | 'delete' | 'edit' | 'assignInternship' | 'internshipStatus' | 'completeInternship' | 'removeInternship';
+
+const MemberManagementView: React.FC<MemberManagementViewProps> = ({ userRole, startups, onRefresh, onShowAlert, showConfirm }) => {
   const [members, setMembers] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
   const [search, setSearch] = useState('');
-  const [activeView, setActiveView] = useState<'members' | 'startups'>('members');
+  const [activeView, setActiveView] = useState<'members' | 'startups' | 'internships' | 'workloads'>('members');
   const [roleFilter, setRoleFilter] = useState<'ALL' | UserRole.STUDENT | UserRole.LECTURER>('ALL');
+  const [internshipFilter, setInternshipFilter] = useState<'ALL' | 'NONE' | 'PLANNED' | 'ONGOING' | 'COMPLETED' | 'CANCELLED'>('ALL');
+  const [memberPage, setMemberPage] = useState(1);
+  const [memberColumnFilters, setMemberColumnFilters] = useState({ name: '', id: '', startup: '', jobDesk: '', internship: '', workload: '', status: '' });
   
   // Modal & Popup States
   const [showAddMember, setShowAddMember] = useState(false);
@@ -37,6 +49,100 @@ const MemberManagementView: React.FC<MemberManagementViewProps> = ({ startups, o
   const [isProcessingStartup, setIsProcessingStartup] = useState(false);
   const [isProcessingAdd, setIsProcessingAdd] = useState(false);
   const [startupLogoPreview, setStartupLogoPreview] = useState<string | null>(null);
+  const [transferMode, setTransferMode] = useState<'import' | 'export' | null>(null);
+  const [transferRole, setTransferRole] = useState<TransferRole>('STUDENT');
+  const [transferFormat, setTransferFormat] = useState<TransferFormat>('xlsx');
+  const [duplicateMode, setDuplicateMode] = useState<'skip' | 'update'>('skip');
+  const [importStep, setImportStep] = useState<ImportStep>('select');
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importPreview, setImportPreview] = useState<any | null>(null);
+  const [importResult, setImportResult] = useState<any | null>(null);
+  const [isTransferProcessing, setIsTransferProcessing] = useState(false);
+  const [selectedMemberKeys, setSelectedMemberKeys] = useState<string[]>([]);
+  const [bulkAction, setBulkAction] = useState<BulkAction>('activate');
+  const [isBulkProcessing, setIsBulkProcessing] = useState(false);
+  const [showBulkEdit, setShowBulkEdit] = useState(false);
+  const [bulkEditData, setBulkEditData] = useState({
+    name: '', email: '', password: '', studentType: '', startupId: '', studentJobDesk: '', lecturerCode: '', lecturerJobDesks: ''
+  });
+  const [showInternshipBulk, setShowInternshipBulk] = useState(false);
+  const [internshipBulkPreview, setInternshipBulkPreview] = useState<any[] | null>(null);
+  const [internshipBulkStatus, setInternshipBulkStatus] = useState<'PLANNED' | 'ONGOING' | 'COMPLETED' | 'CANCELLED'>('PLANNED');
+  const [internshipBulkDraft, setInternshipBulkDraft] = useState({ startupId: '', startDate: '', endDate: '', fieldSupervisor: '', academicSupervisorNip: '', academicSupervisor2Nip: '', status: 'PLANNED' as const });
+
+  const closeTransfer = () => {
+    setTransferMode(null);
+    setImportFile(null);
+    setImportPreview(null);
+    setImportResult(null);
+    setImportStep('select');
+  };
+
+  const downloadBlob = (blob: Blob, fallbackName: string) => {
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = fallbackName;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleTemplateDownload = async () => {
+    try {
+      setIsTransferProcessing(true);
+      const blob = await api.downloadMemberTemplate(transferRole);
+      downloadBlob(blob, `template-${transferRole === 'STUDENT' ? 'mahasiswa' : 'dosen'}-kolab.xlsx`);
+    } catch (error) {
+      onShowAlert('Template Gagal', error instanceof Error ? error.message : 'Template tidak dapat diunduh.', 'error');
+    } finally {
+      setIsTransferProcessing(false);
+    }
+  };
+
+  const handleImportPreview = async () => {
+    if (!importFile) return;
+    try {
+      setIsTransferProcessing(true);
+      const result = await api.memberImportPreview(importFile, transferRole, duplicateMode);
+      setImportPreview(result);
+      setImportStep('preview');
+    } catch (error) {
+      onShowAlert('Preview Gagal', error instanceof Error ? error.message : 'File tidak dapat diproses.', 'error');
+    } finally {
+      setIsTransferProcessing(false);
+    }
+  };
+
+  const handleImportCommit = async () => {
+    if (!importPreview) return;
+    try {
+      setIsTransferProcessing(true);
+      const result = await api.memberImportCommit(transferRole, importPreview.rows);
+      setImportResult(result);
+      setImportStep('result');
+      await fetchMembers();
+      onRefresh?.();
+    } catch (error) {
+      onShowAlert('Import Gagal', error instanceof Error ? error.message : 'Data tidak dapat disimpan.', 'error');
+    } finally {
+      setIsTransferProcessing(false);
+    }
+  };
+
+  const handleMemberExport = async () => {
+    try {
+      setIsTransferProcessing(true);
+      const blob = await api.downloadMemberFile(transferRole, transferFormat, search);
+      const label = transferRole === 'STUDENT' ? 'mahasiswa' : 'dosen';
+      downloadBlob(blob, `data-${label}-kolab-${new Date().toISOString().slice(0, 10)}.${transferFormat}`);
+      onShowAlert('Export Berhasil', `Data ${label} berhasil diunduh.`, 'success');
+      closeTransfer();
+    } catch (error) {
+      onShowAlert('Export Gagal', error instanceof Error ? error.message : 'Data tidak dapat diekspor.', 'error');
+    } finally {
+      setIsTransferProcessing(false);
+    }
+  };
 
   const handleRefresh = async () => {
     setIsSyncing(true);
@@ -72,8 +178,178 @@ const MemberManagementView: React.FC<MemberManagementViewProps> = ({ startups, o
     const matchesSearch = m.name?.toLowerCase().includes(search.toLowerCase()) || 
                          m.studentId?.toString().toLowerCase().includes(search.toLowerCase());
     const matchesRole = roleFilter === 'ALL' || m.role === roleFilter;
-    return matchesSearch && matchesRole;
+    const matchesInternship = roleFilter !== UserRole.STUDENT || internshipFilter === 'ALL'
+      || (internshipFilter === 'NONE' ? !m.internshipStatus : m.internshipStatus === internshipFilter);
+    const startupName = startups.find(s => s.id === m.startupId)?.name || '';
+    const status = `${m.isActive ? 'active' : 'inactive'} ${m.isApproved ? 'approved' : 'unapproved'}`;
+    return matchesSearch && matchesRole && matchesInternship &&
+      m.name?.toLowerCase().includes(memberColumnFilters.name.toLowerCase()) &&
+      String(m.studentId || '').toLowerCase().includes(memberColumnFilters.id.toLowerCase()) &&
+      startupName.toLowerCase().includes(memberColumnFilters.startup.toLowerCase()) &&
+      String(m.studentJobDesk || m.lecturerCode || '').toLowerCase().includes(memberColumnFilters.jobDesk.toLowerCase()) &&
+      String(m.internshipStatus || 'Tidak Magang').toLowerCase().includes(memberColumnFilters.internship.toLowerCase()) &&
+      `${m.workload?.activeLoad || 0} ${m.workload?.totalHistory || 0}`.includes(memberColumnFilters.workload.toLowerCase()) &&
+      status.includes(memberColumnFilters.status.toLowerCase());
   });
+  const memberPageSize = 10;
+  const pagedMembers = filteredMembers.slice((memberPage - 1) * memberPageSize, memberPage * memberPageSize);
+  const memberTotalPages = Math.ceil(filteredMembers.length / memberPageSize);
+  useEffect(() => { setMemberPage(1); }, [search, roleFilter, internshipFilter, memberColumnFilters]);
+
+  const memberKey = (member: any) => `${member.role}:${member.studentId}`;
+  const allVisibleSelected = filteredMembers.length > 0 && filteredMembers.every(member => selectedMemberKeys.includes(memberKey(member)));
+
+  const toggleMemberSelection = (member: any) => {
+    const key = memberKey(member);
+    setSelectedMemberKeys(current => current.includes(key) ? current.filter(item => item !== key) : [...current, key]);
+  };
+
+  const toggleVisibleSelection = () => {
+    const visibleKeys = filteredMembers.map(memberKey);
+    setSelectedMemberKeys(current => allVisibleSelected
+      ? current.filter(key => !visibleKeys.includes(key))
+      : Array.from(new Set([...current, ...visibleKeys])));
+  };
+
+  const openBulkEdit = () => {
+    setBulkEditData({ name: '', email: '', password: '', studentType: '', startupId: '', studentJobDesk: '', lecturerCode: '', lecturerJobDesks: '' });
+    setShowBulkEdit(true);
+  };
+
+  const selectedStudentMembers = () => members
+    .filter(member => selectedMemberKeys.includes(memberKey(member)) && member.role === UserRole.STUDENT);
+
+  const openInternshipBulk = () => {
+    const students = selectedStudentMembers();
+    if (!students.length || students.length !== selectedMemberKeys.length) {
+      onShowAlert('Aksi Magang', 'Pilih mahasiswa saja. Lecturer tidak dapat diproses dengan aksi magang.', 'error');
+      return;
+    }
+    setShowInternshipBulk(true);
+  };
+
+  const prepareInternshipBulkPreview = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!internshipBulkDraft.startupId || !internshipBulkDraft.startDate || !internshipBulkDraft.endDate) {
+      onShowAlert('Data Magang', 'Startup, tanggal mulai, dan tanggal selesai wajib diisi.', 'error');
+      return;
+    }
+    setInternshipBulkPreview(selectedStudentMembers().map(member => ({
+      studentNim: member.studentId,
+      studentName: member.name,
+      ...internshipBulkDraft
+    })));
+  };
+
+  const commitInternshipBulk = async () => {
+    if (!internshipBulkPreview) return;
+    setIsBulkProcessing(true);
+    const result = await api.postData('manageInternshipsBulk', { operation: 'create', internships: internshipBulkPreview });
+    setIsBulkProcessing(false);
+    if (result?.status === 'success') {
+      setShowInternshipBulk(false);
+      setInternshipBulkPreview(null);
+      setSelectedMemberKeys([]);
+      await fetchMembers();
+      onShowAlert('Magang Berhasil', `${result.affected || 0} data magang berhasil dibuat.`, 'success');
+    } else onShowAlert('Magang Gagal', result?.message || 'Data magang gagal disimpan.', 'error');
+  };
+
+  const handleBulkAction = async () => {
+    const selectedMembers = members
+      .filter(member => selectedMemberKeys.includes(memberKey(member)))
+      .map(member => ({ role: member.role, id: member.studentId }));
+    if (!selectedMembers.length) return;
+    if (['assignInternship', 'internshipStatus', 'completeInternship', 'removeInternship'].includes(bulkAction)) {
+      if (bulkAction === 'assignInternship') {
+        openInternshipBulk();
+        return;
+      }
+      const students = selectedStudentMembers();
+      if (students.length !== selectedMembers.length) {
+        onShowAlert('Aksi Magang', 'Pilih mahasiswa saja. Lecturer tidak dapat diproses dengan aksi magang.', 'error');
+        return;
+      }
+      if (bulkAction === 'internshipStatus') {
+        const nextStatus = window.prompt('Masukkan status: PLANNED, ONGOING, COMPLETED, atau CANCELLED', 'ONGOING')?.toUpperCase();
+        if (!nextStatus) return;
+        if (!['PLANNED', 'ONGOING', 'COMPLETED', 'CANCELLED'].includes(nextStatus)) {
+          onShowAlert('Aksi Magang', 'Status magang tidak valid.', 'error');
+          return;
+        }
+        setInternshipBulkStatus(nextStatus as typeof internshipBulkStatus);
+        const rows = students.map(member => ({ studentNim: member.studentId, status: nextStatus }));
+        showConfirm('Konfirmasi Aksi Magang', `Ubah status ${students.length} data magang?`, async () => {
+          setIsBulkProcessing(true);
+          const result = await api.postData('manageInternshipsBulk', { operation: 'status', internships: rows });
+          setIsBulkProcessing(false);
+          if (result?.status === 'success') { setSelectedMemberKeys([]); await fetchMembers(); onShowAlert('Aksi Berhasil', 'Status magang berhasil diperbarui.', 'success'); }
+          else onShowAlert('Aksi Gagal', result?.message || 'Status magang gagal diproses.', 'error');
+        });
+        return;
+      }
+      const operation = bulkAction === 'removeInternship' ? 'delete' : 'status';
+      const rows = students.map(member => ({ studentNim: member.studentId, status: 'COMPLETED' }));
+      showConfirm('Konfirmasi Aksi Magang', `Proses ${students.length} data magang?`, async () => {
+        setIsBulkProcessing(true);
+        const result = await api.postData('manageInternshipsBulk', { operation, internships: rows });
+        setIsBulkProcessing(false);
+        if (result?.status === 'success') { setSelectedMemberKeys([]); await fetchMembers(); onShowAlert('Aksi Berhasil', 'Data magang berhasil diperbarui.', 'success'); }
+        else onShowAlert('Aksi Gagal', result?.message || 'Data magang gagal diproses.', 'error');
+      });
+      return;
+    }
+    if (bulkAction === 'edit') {
+      openBulkEdit();
+      return;
+    }
+    const actionLabel = {
+      approve: 'menyetujui',
+      unapprove: 'membatalkan persetujuan',
+      activate: 'mengaktifkan',
+      deactivate: 'menonaktifkan',
+      delete: 'menghapus'
+    }[bulkAction];
+    showConfirm('Konfirmasi Bulk Action', `Anda akan ${actionLabel} ${selectedMembers.length} member. Lanjutkan?`, async () => {
+      setIsBulkProcessing(true);
+      const result = await api.postData('bulkManageMembers', { bulkAction, members: selectedMembers });
+      setIsBulkProcessing(false);
+      if (result?.status === 'success') {
+        setSelectedMemberKeys([]);
+        onShowAlert('Bulk Action Berhasil', `${result.affected || 0} member berhasil diproses.`, 'success');
+        await fetchMembers();
+      } else {
+        onShowAlert('Bulk Action Gagal', result?.message || 'Aksi bulk tidak dapat diproses.', 'error');
+      }
+    });
+  };
+
+  const submitBulkEdit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const selectedMembers = members
+      .filter(member => selectedMemberKeys.includes(memberKey(member)))
+      .map(member => ({ role: member.role, id: member.studentId }));
+    const data: Record<string, string> = {};
+    Object.entries(bulkEditData).forEach(([key, value]) => {
+      if (value.trim() !== '') data[key] = value.trim();
+    });
+    if (!selectedMembers.length || !Object.keys(data).length) {
+      onShowAlert('Bulk Edit', 'Pilih minimal satu member dan satu field yang akan diubah.', 'error');
+      return;
+    }
+    setIsBulkProcessing(true);
+    const result = await api.postData('bulkManageMembers', { bulkAction: 'edit', members: selectedMembers, data });
+    setIsBulkProcessing(false);
+    if (result?.status === 'success') {
+      setShowBulkEdit(false);
+      setSelectedMemberKeys([]);
+      setBulkEditData({ name: '', email: '', password: '', studentType: '', startupId: '', studentJobDesk: '', lecturerCode: '', lecturerJobDesks: '' });
+      onShowAlert('Bulk Edit Berhasil', `${result.affected || 0} member berhasil diperbarui.`, 'success');
+      await fetchMembers();
+    } else {
+      onShowAlert('Bulk Edit Gagal', result?.message || 'Detail member tidak dapat diperbarui.', 'error');
+    }
+  };
 
   const handleAddMember = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -178,13 +454,15 @@ const MemberManagementView: React.FC<MemberManagementViewProps> = ({ startups, o
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-8">
         <div>
           <h2 className="text-5xl font-black text-slate-900 tracking-tighter">Management User</h2>
-          <div className="flex gap-4 mt-6">
+          <div className="flex flex-wrap gap-4 mt-6">
             <button onClick={() => setActiveView('members')} className={`px-8 py-3 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all ${activeView === 'members' ? 'bg-slate-900 text-white shadow-xl' : 'bg-white text-slate-400 border border-slate-100'}`}>User Directory</button>
             <button onClick={() => setActiveView('startups')} className={`px-8 py-3 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all ${activeView === 'startups' ? 'bg-orange-600 text-white shadow-xl' : 'bg-white text-slate-400 border border-slate-100'}`}>Startup Cluster</button>
+            {userRole === UserRole.ADMIN && <button onClick={() => setActiveView('internships')} className={`px-8 py-3 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all ${activeView === 'internships' ? 'bg-orange-600 text-white shadow-xl' : 'bg-white text-slate-400 border border-slate-100'}`}>Kelola Magang</button>}
+            {userRole === UserRole.ADMIN && <button onClick={() => setActiveView('workloads')} className={`px-8 py-3 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all ${activeView === 'workloads' ? 'bg-indigo-600 text-white shadow-xl' : 'bg-white text-slate-400 border border-slate-100'}`}>Kelola Workload</button>}
           </div>
         </div>
         
-        <div className="flex flex-wrap gap-4 items-center">
+        {(activeView === 'members' || activeView === 'startups') && <div className="flex flex-wrap gap-4 items-center">
           <button 
             onClick={handleRefresh}
             className="p-3.5 bg-white border border-slate-100 text-slate-400 hover:text-orange-600 rounded-2xl shadow-sm transition-all hover:shadow-md active:scale-95 group"
@@ -207,6 +485,84 @@ const MemberManagementView: React.FC<MemberManagementViewProps> = ({ startups, o
                 </select>
               </div>
             )}
+            {activeView === 'members' && roleFilter !== UserRole.LECTURER && (
+              <select value={internshipFilter} onChange={e => setInternshipFilter(e.target.value as typeof internshipFilter)} className="px-5 py-4 bg-white border border-slate-100 rounded-2xl shadow-sm outline-none font-bold text-xs focus:ring-4 focus:ring-orange-100">
+                <option value="ALL">Semua Status Magang</option>
+                <option value="NONE">Tidak Magang</option>
+                <option value="PLANNED">Akan Magang</option>
+                <option value="ONGOING">Sedang Magang</option>
+                <option value="COMPLETED">Selesai</option>
+                <option value="CANCELLED">Dibatalkan</option>
+              </select>
+            )}
+
+            {showBulkEdit && (
+              <div className="fixed inset-0 z-[185] bg-slate-900/60 backdrop-blur-md flex items-center justify-center p-6 overflow-y-auto">
+                <div className="bg-white w-full max-w-2xl rounded-[3rem] shadow-2xl p-8 lg:p-10 my-auto">
+                  <div className="flex items-center justify-between mb-8">
+                    <div>
+                      <h3 className="text-3xl font-black text-slate-900 tracking-tight">Bulk Edit Detail User</h3>
+                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-2">{selectedMemberKeys.length} member dipilih · field kosong tidak diubah</p>
+                    </div>
+                    <button type="button" onClick={() => setShowBulkEdit(false)} className="p-3 bg-slate-50 text-slate-400 rounded-xl hover:text-red-500"><X size={24} /></button>
+                  </div>
+                  <form onSubmit={submitBulkEdit} className="space-y-5">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <input value={bulkEditData.name} onChange={e => setBulkEditData({ ...bulkEditData, name: e.target.value })} placeholder="Nama baru (opsional)" className="px-5 py-4 bg-slate-50 rounded-2xl font-bold outline-none" />
+                      <input type="email" value={bulkEditData.email} onChange={e => setBulkEditData({ ...bulkEditData, email: e.target.value })} placeholder="Email baru (opsional)" className="px-5 py-4 bg-slate-50 rounded-2xl font-bold outline-none" />
+                      <input type="password" value={bulkEditData.password} onChange={e => setBulkEditData({ ...bulkEditData, password: e.target.value })} placeholder="Password baru (opsional)" className="px-5 py-4 bg-slate-50 rounded-2xl font-bold outline-none" />
+                      <input value={bulkEditData.lecturerCode} onChange={e => setBulkEditData({ ...bulkEditData, lecturerCode: e.target.value })} placeholder="Kode dosen (dosen)" className="px-5 py-4 bg-slate-50 rounded-2xl font-bold outline-none" />
+                      <select value={bulkEditData.studentType} onChange={e => setBulkEditData({ ...bulkEditData, studentType: e.target.value })} className="px-5 py-4 bg-slate-50 rounded-2xl font-bold outline-none">
+                        <option value="">Ecosystem Routing (tidak diubah)</option>
+                        <option value="STARTUP">STARTUP</option>
+                        <option value="NON_STARTUP">NON_STARTUP</option>
+                      </select>
+                      <select value={bulkEditData.startupId} onChange={e => setBulkEditData({ ...bulkEditData, startupId: e.target.value })} className="px-5 py-4 bg-slate-50 rounded-2xl font-bold outline-none">
+                        <option value="">Pertahankan startup masing-masing</option>
+                        {startups.map(startup => <option key={startup.id} value={startup.id}>{startup.name} ({startup.id})</option>)}
+                      </select>
+                      <input value={bulkEditData.studentJobDesk} onChange={e => setBulkEditData({ ...bulkEditData, studentJobDesk: e.target.value })} placeholder="Job desk mahasiswa" className="px-5 py-4 bg-slate-50 rounded-2xl font-bold outline-none" />
+                      <input value={bulkEditData.lecturerJobDesks} onChange={e => setBulkEditData({ ...bulkEditData, lecturerJobDesks: e.target.value })} placeholder="Job desk dosen, pisahkan koma" className="px-5 py-4 bg-slate-50 rounded-2xl font-bold outline-none" />
+                    </div>
+                    <p className="text-xs text-slate-500 font-bold">Field yang tidak relevan dengan role member akan diabaikan. Password akan di-hash oleh backend.</p>
+                    <button type="submit" disabled={isBulkProcessing} className="w-full py-5 bg-slate-900 text-white rounded-2xl font-black uppercase tracking-widest flex items-center justify-center gap-3 disabled:opacity-50">
+                      {isBulkProcessing ? <Loader2 className="animate-spin" size={18} /> : <Save size={18} />} Simpan Bulk Edit
+                    </button>
+                  </form>
+                </div>
+              </div>
+            )}
+
+            {showInternshipBulk && (
+              <div className="fixed inset-0 z-[190] bg-slate-900/60 backdrop-blur-md flex items-center justify-center p-6 overflow-y-auto">
+                <div className="bg-white w-full max-w-5xl rounded-[3rem] shadow-2xl p-8 lg:p-10 my-auto max-h-[92vh] overflow-y-auto">
+                  <div className="flex items-center justify-between mb-8">
+                    <div><h3 className="text-3xl font-black text-slate-900 tracking-tight">Tambah Magang Massal</h3><p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-2">{selectedStudentMembers().length} mahasiswa dipilih</p></div>
+                    <button type="button" onClick={() => { setShowInternshipBulk(false); setInternshipBulkPreview(null); }} className="p-3 bg-slate-50 text-slate-400 rounded-xl hover:text-red-500"><X size={24} /></button>
+                  </div>
+                  {!internshipBulkPreview ? (
+                    <form onSubmit={prepareInternshipBulkPreview} className="space-y-6">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <select required value={internshipBulkDraft.startupId} onChange={e => setInternshipBulkDraft({ ...internshipBulkDraft, startupId: e.target.value })} className="px-5 py-4 bg-slate-50 rounded-2xl font-bold outline-none"><option value="">Startup tempat magang *</option>{startups.map(startup => <option key={startup.id} value={startup.id}>{startup.name}</option>)}</select>
+                        <select value={internshipBulkDraft.academicSupervisorNip} onChange={e => setInternshipBulkDraft({ ...internshipBulkDraft, academicSupervisorNip: e.target.value })} className="px-5 py-4 bg-slate-50 rounded-2xl font-bold outline-none"><option value="">Pembimbing akademik 1</option>{members.filter(member => member.role === UserRole.LECTURER).map(lecturer => <option key={lecturer.studentId} value={lecturer.studentId}>{lecturer.name} — {lecturer.studentId}</option>)}</select>
+                        <select value={internshipBulkDraft.academicSupervisor2Nip} onChange={e => setInternshipBulkDraft({ ...internshipBulkDraft, academicSupervisor2Nip: e.target.value })} className="px-5 py-4 bg-slate-50 rounded-2xl font-bold outline-none"><option value="">Pembimbing akademik 2 (opsional)</option>{members.filter(member => member.role === UserRole.LECTURER).map(lecturer => <option key={lecturer.studentId} value={lecturer.studentId}>{lecturer.name} — {lecturer.studentId}</option>)}</select>
+                        <input required type="date" value={internshipBulkDraft.startDate} onChange={e => setInternshipBulkDraft({ ...internshipBulkDraft, startDate: e.target.value })} className="px-5 py-4 bg-slate-50 rounded-2xl font-bold outline-none" />
+                        <input required type="date" value={internshipBulkDraft.endDate} min={internshipBulkDraft.startDate} onChange={e => setInternshipBulkDraft({ ...internshipBulkDraft, endDate: e.target.value })} className="px-5 py-4 bg-slate-50 rounded-2xl font-bold outline-none" />
+                        <input value={internshipBulkDraft.fieldSupervisor} onChange={e => setInternshipBulkDraft({ ...internshipBulkDraft, fieldSupervisor: e.target.value })} placeholder="Pembimbing lapangan" className="px-5 py-4 bg-slate-50 rounded-2xl font-bold outline-none" />
+                        <select value={internshipBulkDraft.status} onChange={e => setInternshipBulkDraft({ ...internshipBulkDraft, status: e.target.value as typeof internshipBulkDraft.status })} className="px-5 py-4 bg-slate-50 rounded-2xl font-bold outline-none"><option value="PLANNED">Akan Magang</option><option value="ONGOING">Sedang Magang</option><option value="COMPLETED">Selesai</option><option value="CANCELLED">Dibatalkan</option></select>
+                      </div>
+                      <div className="rounded-2xl bg-slate-50 p-5 space-y-2 max-h-48 overflow-auto">{selectedStudentMembers().map(member => <div key={member.studentId} className="font-bold text-sm text-slate-700">✓ {member.name} <span className="font-mono text-xs text-slate-400">{member.studentId}</span></div>)}</div>
+                      <button type="submit" className="w-full py-5 bg-orange-600 text-white rounded-2xl font-black uppercase tracking-widest">Lanjut Preview</button>
+                    </form>
+                  ) : (
+                    <div className="space-y-5">
+                      <div className="overflow-auto rounded-2xl border border-slate-100"><table className="w-full text-left text-xs"><thead className="bg-slate-50"><tr><th className="p-3">Mahasiswa</th><th className="p-3">Startup</th><th className="p-3">Periode</th><th className="p-3">Status</th></tr></thead><tbody>{internshipBulkPreview.map(row => <tr key={row.studentNim} className="border-t border-slate-100"><td className="p-3 font-bold">{row.studentName}<div className="font-mono text-slate-400">{row.studentNim}</div></td><td className="p-3">{startups.find(startup => startup.id === row.startupId)?.name || row.startupId}</td><td className="p-3">{row.startDate} s/d {row.endDate}</td><td className="p-3">{row.status}</td></tr>)}</tbody></table></div>
+                      <div className="flex gap-3"><button type="button" onClick={() => setInternshipBulkPreview(null)} className="flex-1 py-4 bg-slate-100 rounded-2xl font-black uppercase tracking-widest">Kembali</button><button type="button" disabled={isBulkProcessing} onClick={commitInternshipBulk} className="flex-1 py-4 bg-slate-900 text-white rounded-2xl font-black uppercase tracking-widest disabled:opacity-50">{isBulkProcessing ? 'Menyimpan...' : `Simpan ${internshipBulkPreview.length} Data Magang`}</button></div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
             <div className="relative w-full md:w-64 group">
               <Search className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-300" size={18} />
               <input type="text" placeholder="Identity Query..." value={search} onChange={e => setSearch(e.target.value)} className="w-full pl-14 pr-6 py-4 bg-white border border-slate-100 rounded-2xl shadow-sm outline-none font-bold focus:ring-4 focus:ring-orange-100 transition-all" />
@@ -218,33 +574,64 @@ const MemberManagementView: React.FC<MemberManagementViewProps> = ({ startups, o
           ) : (
             <button onClick={() => { setStartupLogoPreview(null); setShowStartupModal({ isOpen: true, mode: 'add' }); }} className="px-6 py-4 bg-orange-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest flex items-center gap-2 shadow-xl hover:bg-orange-700 transition-all active:scale-95"><Rocket size={18}/> New Startup</button>
           )}
-        </div>
+        </div>}
       </div>
 
-      <div className="bg-white rounded-[3rem] border border-slate-100 shadow-sm overflow-hidden min-h-[500px]">
+      {activeView === 'internships' ? (userRole === UserRole.ADMIN && <InternshipManagement onShowAlert={onShowAlert} showConfirm={showConfirm} />) : activeView === 'workloads' ? (userRole === UserRole.ADMIN && <WorkloadManagement onShowAlert={onShowAlert} showConfirm={showConfirm} />) : <div className="bg-white rounded-[3rem] border border-slate-100 shadow-sm overflow-hidden min-h-[500px]"> 
         {activeView === 'members' ? (
+          <>
+          <div className="px-10 pt-8 flex flex-wrap gap-3 items-center">
+            <button onClick={() => { setTransferMode('import'); setTransferRole(roleFilter === UserRole.LECTURER ? 'LECTURER' : 'STUDENT'); }} className="px-5 py-3 bg-orange-50 text-orange-700 rounded-2xl font-black text-[10px] uppercase tracking-widest flex items-center gap-2 hover:bg-orange-100"><Upload size={16} /> Import Data</button>
+            <button onClick={() => { setTransferMode('export'); setTransferRole(roleFilter === UserRole.LECTURER ? 'LECTURER' : 'STUDENT'); setTransferFormat('xlsx'); }} className="px-5 py-3 bg-emerald-50 text-emerald-700 rounded-2xl font-black text-[10px] uppercase tracking-widest flex items-center gap-2 hover:bg-emerald-100"><Download size={16} /> Export Data</button>
+            <select value={bulkAction} onChange={e => setBulkAction(e.target.value as BulkAction)} disabled={!selectedMemberKeys.length || isBulkProcessing} className="px-4 py-3 bg-slate-50 border border-slate-100 rounded-2xl font-black text-[10px] uppercase tracking-widest outline-none disabled:opacity-50">
+              <option value="activate">Aktifkan</option>
+              <option value="deactivate">Nonaktifkan</option>
+              <option value="approve">Setujui</option>
+              <option value="unapprove">Batalkan Persetujuan</option>
+              <option value="delete">Hapus</option>
+              <option value="edit">Edit Detail</option>
+              <option value="assignInternship">Tetapkan Magang</option>
+              <option value="internshipStatus">Ubah Status Magang</option>
+              <option value="completeInternship">Selesaikan Magang</option>
+              <option value="removeInternship">Hapus dari Magang</option>
+            </select>
+            <button onClick={handleBulkAction} disabled={!selectedMemberKeys.length || isBulkProcessing} className="px-5 py-3 bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest flex items-center gap-2 disabled:opacity-50"><ListChecks size={16} /> {isBulkProcessing ? 'Processing...' : `Bulk Action (${selectedMemberKeys.length})`}</button>
+            <button type="button" onClick={openBulkEdit} disabled={!selectedMemberKeys.length || isBulkProcessing} className="px-5 py-3 bg-indigo-50 text-indigo-700 rounded-2xl font-black text-[10px] uppercase tracking-widest flex items-center gap-2 disabled:opacity-50"><Edit3 size={16} /> Edit Detail Terpilih</button>
+          </div>
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead>
                 <tr className="bg-slate-50 border-b border-slate-100">
+                  <th className="px-6 py-6 text-left"><input type="checkbox" checked={allVisibleSelected} onChange={toggleVisibleSelection} aria-label="Pilih semua member yang terlihat" className="h-4 w-4 accent-orange-600" /></th>
                   <th className="px-10 py-6 text-left text-[10px] font-black text-slate-400 uppercase tracking-widest">Name</th>
                   <th className="px-10 py-6 text-left text-[10px] font-black text-slate-400 uppercase tracking-widest">NIM / NIP</th>
                   <th className="px-10 py-6 text-left text-[10px] font-black text-slate-400 uppercase tracking-widest">Startup</th>
                   <th className="px-10 py-6 text-left text-[10px] font-black text-slate-400 uppercase tracking-widest">JobDesk</th>
+                  <th className="px-10 py-6 text-left text-[10px] font-black text-slate-400 uppercase tracking-widest">Magang</th>
+                  <th className="px-10 py-6 text-left text-[10px] font-black text-slate-400 uppercase tracking-widest">Workload</th>
                   <th className="px-10 py-6 text-left text-[10px] font-black text-slate-400 uppercase tracking-widest">Status</th>
                   <th className="px-10 py-6 text-right text-[10px] font-black text-slate-400 uppercase tracking-widest">Operations</th>
+                </tr>
+                <tr className="bg-white border-b border-slate-100">
+                  <th className="px-6 py-3"></th>
+                  {[
+                    ['name', 'Filter nama'], ['id', 'Filter NIM/NIP'], ['startup', 'Filter startup'],
+                    ['jobDesk', 'Filter job desk'], ['internship', 'Filter magang'], ['workload', 'Filter workload'], ['status', 'Filter status']
+                  ].map(([key, placeholder]) => <th key={key} className="px-10 py-3"><input aria-label={placeholder} placeholder="Filter..." value={memberColumnFilters[key as keyof typeof memberColumnFilters]} onChange={e => setMemberColumnFilters(filters => ({ ...filters, [key]: e.target.value }))} className="w-full min-w-[90px] px-3 py-2 rounded-xl bg-slate-50 text-xs font-bold outline-none" /></th>)}
+                  <th className="px-10 py-3"></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {isLoading ? (
-                  <tr><td colSpan={6} className="py-32 text-center text-[10px] font-black uppercase text-slate-300 animate-pulse tracking-[0.3em]">Accessing Identity Mainframe...</td></tr>
+                  <tr><td colSpan={9} className="py-32 text-center text-[10px] font-black uppercase text-slate-300 animate-pulse tracking-[0.3em]">Accessing Identity Mainframe...</td></tr>
                 ) : filteredMembers.length === 0 ? (
-                  <tr><td colSpan={6} className="py-32 text-center text-[10px] font-black uppercase text-slate-300 tracking-[0.3em]">No users found in this sector</td></tr>
-                ) : filteredMembers.map(m => {
+                  <tr><td colSpan={9} className="py-32 text-center text-[10px] font-black uppercase text-slate-300 tracking-[0.3em]">No users found in this sector</td></tr>
+                ) : pagedMembers.map(m => {
                   const isAccountActive = m.isActive && m.isApproved;
                   const startupName = startups.find(s => s.id === m.startupId)?.name || 'Global Registry';
                   return (
                     <tr key={m.studentId} className="hover:bg-slate-50/50 transition-colors group">
+                      <td className="px-6 py-6"><input type="checkbox" checked={selectedMemberKeys.includes(memberKey(m))} onChange={() => toggleMemberSelection(m)} aria-label={`Pilih ${m.name}`} className="h-4 w-4 accent-orange-600" /></td>
                       <td className="px-10 py-6">
                         <div className="flex items-center gap-4">
                            <div className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center font-black text-[11px] text-slate-400 group-hover:bg-slate-900 group-hover:text-white transition-all duration-500 shadow-sm">{m.name ? m.name[0] : '?'}</div>
@@ -262,8 +649,21 @@ const MemberManagementView: React.FC<MemberManagementViewProps> = ({ startups, o
                            </span>
                          ) : <span className="text-slate-200">---</span>}
                       </td>
+                      <td className="px-10 py-6"><span className={`px-3 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-widest inline-flex border ${Number(m.workload?.activeLoad || 0) >= 3 ? 'bg-red-50 text-red-600 border-red-100' : Number(m.workload?.activeLoad || 0) === 2 ? 'bg-amber-50 text-amber-600 border-amber-100' : Number(m.workload?.activeLoad || 0) === 1 ? 'bg-emerald-50 text-emerald-600 border-emerald-100' : 'bg-slate-50 text-slate-400 border-slate-100'}`}>{m.workload?.activeLoad || 0} · {Number(m.workload?.activeLoad || 0) >= 3 ? 'TINGGI' : Number(m.workload?.activeLoad || 0) === 2 ? 'SEDANG' : Number(m.workload?.activeLoad || 0) === 1 ? 'RINGAN' : 'KOSONG'}</span></td>
                       <td className="px-10 py-6">
                          <span className="text-[10px] font-black text-slate-500 uppercase tracking-tight">{m.studentJobDesk || m.lecturerCode || 'Standard'}</span>
+                      </td>
+                      <td className="px-10 py-6">
+                        {m.role === UserRole.STUDENT ? (
+                          <span className={`px-3 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-widest inline-flex border ${
+                            m.internshipStatus === 'ONGOING' ? 'bg-orange-50 text-orange-600 border-orange-100' :
+                            m.internshipStatus === 'PLANNED' ? 'bg-slate-50 text-slate-600 border-slate-200' :
+                            m.internshipStatus === 'COMPLETED' ? 'bg-emerald-50 text-emerald-600 border-emerald-100' :
+                            m.internshipStatus === 'CANCELLED' ? 'bg-red-50 text-red-600 border-red-100' : 'bg-slate-50 text-slate-400 border-slate-100'
+                          }`}>
+                            {m.internshipStatus === 'ONGOING' ? 'Sedang Magang' : m.internshipStatus === 'PLANNED' ? 'Akan Magang' : m.internshipStatus === 'COMPLETED' ? 'Selesai' : m.internshipStatus === 'CANCELLED' ? 'Dibatalkan' : 'Tidak Magang'}
+                          </span>
+                        ) : <span className="text-slate-200">---</span>}
                       </td>
                       <td className="px-10 py-6">
                         <div className={`px-4 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-widest inline-flex items-center gap-1.5 border ${isAccountActive ? 'bg-emerald-50 text-emerald-600 border-emerald-100/50' : 'bg-red-50 text-red-600 border-red-100/50'}`}>
@@ -289,6 +689,10 @@ const MemberManagementView: React.FC<MemberManagementViewProps> = ({ startups, o
               </tbody>
             </table>
           </div>
+          <div className="px-10 py-6 border-t border-slate-100 flex justify-end">
+             <TablePagination page={memberPage} totalPages={memberTotalPages} totalRows={filteredMembers.length} pageSize={memberPageSize} onPageChange={setMemberPage} />
+          </div>
+          </>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 p-10 gap-8">
             {startups.map(s => (
@@ -316,7 +720,7 @@ const MemberManagementView: React.FC<MemberManagementViewProps> = ({ startups, o
             ))}
           </div>
         )}
-      </div>
+      </div>}
 
       {showAddMember && (
         <div className="fixed inset-0 z-[150] bg-slate-900/60 backdrop-blur-md flex items-center justify-center p-6 overflow-y-auto">
@@ -387,7 +791,7 @@ const MemberManagementView: React.FC<MemberManagementViewProps> = ({ startups, o
 
                    <div className="space-y-1">
                       <label className="text-[9px] font-black text-slate-400 uppercase ml-2">Mainframe Security Token (Password)</label>
-                      <input name="password" type="password" required className="w-full px-6 py-4 bg-slate-50 rounded-2xl font-bold outline-none border border-transparent focus:border-orange-100 transition-all" />
+                      <input name="password" type="password" placeholder="Kosongkan untuk default password" className="w-full px-6 py-4 bg-slate-50 rounded-2xl font-bold outline-none border border-transparent focus:border-orange-100 transition-all" />
                    </div>
                 </div>
                 <button type="submit" disabled={isProcessingAdd} className="w-full py-6 bg-slate-900 text-white rounded-3xl font-black uppercase tracking-widest shadow-xl flex items-center justify-center gap-3 active:scale-95 transition-all hover:bg-black mt-4">
@@ -554,6 +958,102 @@ const MemberManagementView: React.FC<MemberManagementViewProps> = ({ startups, o
                   {showStartupModal.mode === 'add' ? 'Deploy Startup' : 'Commit Changes'}
                 </button>
              </form>
+          </div>
+        </div>
+      )}
+
+      {transferMode && (
+        <div className="fixed inset-0 z-[180] bg-slate-900/60 backdrop-blur-md flex items-center justify-center p-6 overflow-y-auto">
+          <div className="bg-white w-full max-w-5xl rounded-[3rem] shadow-2xl p-8 lg:p-10 animate-in zoom-in-95 duration-300 my-auto max-h-[92vh] overflow-y-auto scrollbar-hide">
+            <div className="flex items-center justify-between mb-8">
+              <div>
+                <h3 className="text-3xl font-black text-slate-900 tracking-tight">{transferMode === 'import' ? 'Import Data Member' : 'Export Data Member'}</h3>
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-2">Secure Admin Data Transfer</p>
+              </div>
+              <button onClick={closeTransfer} className="p-3 bg-slate-50 text-slate-400 rounded-xl hover:text-red-500"><X size={24} /></button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-8">
+              <div>
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-2">Jenis Data</label>
+                <select value={transferRole} onChange={e => setTransferRole(e.target.value as TransferRole)} disabled={importStep === 'preview' || importStep === 'result'} className="w-full mt-2 px-5 py-4 bg-slate-50 rounded-2xl font-bold outline-none">
+                  <option value="STUDENT">Mahasiswa</option>
+                  <option value="LECTURER">Dosen</option>
+                </select>
+              </div>
+              {transferMode === 'export' ? (
+                <div>
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-2">Format</label>
+                  <select value={transferFormat} onChange={e => setTransferFormat(e.target.value as TransferFormat)} className="w-full mt-2 px-5 py-4 bg-slate-50 rounded-2xl font-bold outline-none">
+                    <option value="xlsx">Excel (.xlsx)</option>
+                    <option value="pdf">PDF (.pdf)</option>
+                  </select>
+                </div>
+              ) : (
+                <div>
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-2">Data Existing</label>
+                  <select value={duplicateMode} onChange={e => setDuplicateMode(e.target.value as 'skip' | 'update')} disabled={importStep !== 'select'} className="w-full mt-2 px-5 py-4 bg-slate-50 rounded-2xl font-bold outline-none">
+                    <option value="skip">Skip data existing</option>
+                    <option value="update">Update data existing</option>
+                  </select>
+                </div>
+              )}
+
+            </div>
+
+            {transferMode === 'export' ? (
+              <div className="space-y-6">
+                <div className="p-6 rounded-3xl bg-emerald-50 border border-emerald-100 text-sm font-bold text-emerald-800">
+                  Export mengikuti pencarian aktif: <span className="font-black">{search || 'Semua data'}</span>. Password dan hash password tidak pernah diekspor.
+                </div>
+                <button onClick={handleMemberExport} disabled={isTransferProcessing} className="w-full py-5 bg-emerald-600 text-white rounded-2xl font-black uppercase tracking-widest flex items-center justify-center gap-3">
+                  {isTransferProcessing ? <Loader2 className="animate-spin" size={18} /> : <Download size={18} />} Download {transferFormat.toUpperCase()}
+                </button>
+              </div>
+            ) : (
+              <>
+                {importStep === 'select' && (
+                  <div className="space-y-6">
+                    <div className="p-6 rounded-3xl bg-orange-50 border border-orange-100 text-sm font-bold text-orange-800">
+                      Upload file maksimal 10 MB. Header dibaca berdasarkan nama kolom, bukan urutan. Kolom yang tidak dikenal akan diabaikan.
+                    </div>
+                    <input type="file" accept=".xlsx,.xls,.csv" onChange={e => setImportFile(e.target.files?.[0] || null)} className="w-full px-5 py-5 bg-slate-50 rounded-2xl font-bold" />
+                    <div className="flex flex-wrap gap-3">
+                      <button onClick={handleTemplateDownload} disabled={isTransferProcessing} className="px-5 py-4 bg-white border border-slate-200 text-slate-700 rounded-2xl font-black text-[10px] uppercase tracking-widest flex items-center gap-2"><FileSpreadsheet size={16} /> Download Template</button>
+                      <button onClick={handleImportPreview} disabled={!importFile || isTransferProcessing} className="flex-1 py-4 bg-orange-600 text-white rounded-2xl font-black uppercase tracking-widest flex items-center justify-center gap-3 disabled:opacity-50">{isTransferProcessing ? <Loader2 className="animate-spin" size={18} /> : <FileText size={18} />} Parse & Preview</button>
+                    </div>
+                  </div>
+                )}
+                {importStep === 'preview' && importPreview && (
+                  <div className="space-y-5">
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                      {[
+                        ['Total', importPreview.totalRows, 'bg-slate-50 text-slate-700'],
+                        ['Valid', importPreview.rows.filter((row: any) => row.status === 'VALID').length, 'bg-emerald-50 text-emerald-700'],
+                        ['Duplicate', importPreview.rows.filter((row: any) => row.status === 'DUPLICATE').length, 'bg-amber-50 text-amber-700'],
+                        ['Invalid', importPreview.rows.filter((row: any) => row.status === 'INVALID').length, 'bg-red-50 text-red-700']
+                      ].map(([label, value, style]) => <div key={String(label)} className={`p-4 rounded-2xl ${style}`}><div className="text-[9px] font-black uppercase tracking-widest">{label}</div><div className="text-2xl font-black">{String(value)}</div></div>)}
+                    </div>
+                    {importPreview.ignored?.length > 0 && <div className="text-xs font-bold text-slate-500">Ignored Column: {importPreview.ignored.join(', ')}</div>}
+                    <div className="overflow-auto max-h-80 border border-slate-100 rounded-2xl">
+                      <table className="w-full text-left text-xs">
+                        <thead className="bg-slate-50 sticky top-0"><tr><th className="p-3">Baris</th><th className="p-3">Identifier</th><th className="p-3">Nama</th><th className="p-3">Status</th><th className="p-3">Alasan</th></tr></thead>
+                        <tbody>{importPreview.rows.map((row: any) => <tr key={row.rowNumber} className="border-t border-slate-50"><td className="p-3">{row.rowNumber}</td><td className="p-3 font-mono">{row.identifier}</td><td className="p-3 font-bold">{row.name}</td><td className="p-3"><span className={`px-2 py-1 rounded-lg font-black ${row.status === 'VALID' ? 'bg-emerald-50 text-emerald-700' : row.status === 'DUPLICATE' ? 'bg-amber-50 text-amber-700' : 'bg-red-50 text-red-700'}`}>{row.status}</span></td><td className="p-3 text-red-600">{row.errors?.join('; ') || (row.status === 'DUPLICATE' ? `Existing (${duplicateMode})` : '-')}</td></tr>)}</tbody>
+                      </table>
+                    </div>
+                    <div className="flex gap-3"><button onClick={() => setImportStep('select')} className="px-6 py-4 bg-slate-100 rounded-2xl font-black uppercase text-[10px] tracking-widest">Back</button><button onClick={handleImportCommit} disabled={isTransferProcessing} className="flex-1 py-4 bg-slate-900 text-white rounded-2xl font-black uppercase tracking-widest flex items-center justify-center gap-3">{isTransferProcessing ? <Loader2 className="animate-spin" size={18} /> : <CheckCircle2 size={18} />} Confirm Import</button></div>
+                  </div>
+                )}
+                {importStep === 'result' && importResult && (
+                  <div className="space-y-6">
+                    <div className="p-8 rounded-3xl bg-emerald-50 border border-emerald-100 text-center"><CheckCircle2 className="mx-auto text-emerald-600 mb-3" size={42} /><h4 className="text-2xl font-black text-emerald-800">Import Completed</h4></div>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">{[['Imported', importResult.imported], ['Updated', importResult.updated], ['Skipped', importResult.skipped], ['Failed', importResult.failed]].map(([label, value]) => <div key={String(label)} className="p-4 rounded-2xl bg-slate-50"><div className="text-[9px] font-black uppercase tracking-widest text-slate-400">{label}</div><div className="text-2xl font-black text-slate-900">{String(value)}</div></div>)}</div>
+                    {importResult.failures?.length > 0 && <div className="p-4 rounded-2xl bg-red-50 text-red-700 text-xs font-bold">{importResult.failures.map((failure: any) => <div key={`${failure.row_number}-${failure.identifier}`}>Row {failure.row_number}: {failure.error_message}</div>)}</div>}
+                    <button onClick={closeTransfer} className="w-full py-4 bg-slate-900 text-white rounded-2xl font-black uppercase tracking-widest">Close</button>
+                  </div>
+                )}
+              </>
+            )}
           </div>
         </div>
       )}

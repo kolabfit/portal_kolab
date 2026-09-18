@@ -269,3 +269,173 @@ test('migration imports all collections and rolls back invalid data (local provi
   assert.equal((await request('/data/assets')).logoUrl, 'imported-logo');
   assert.equal((await request('/data/articles')).length, 1);
 });
+
+test('internships: admin CRUD, validation, authorization, overlap and atomic audit', async t => {
+  const { migrate } = await import('../scripts/migrate.js');
+  const nim = 'intern-student', otherNim = 'intern-student-2', nip = 'intern-lecturer';
+  let startupId, secondStartupId, id;
+  let valid;
+  const write = (type, data = valid, recordId = type === 'add' ? undefined : id, bearer = token, expected = 200) =>
+    bridge('manageInternship', { type, id: recordId, data }, bearer, expected);
+  const rows = () => request('/data/internships');
+  const stored = async recordId => (await db.execute('SELECT * FROM internships WHERE id=?', [recordId]))[0][0];
+  const logCount = async () => Number((await db.query("SELECT COUNT(*) AS count FROM system_logs WHERE action='manageInternship'"))[0][0].count);
+
+  await t.test('migration creates table on an existing database and supplies all indexes', async () => {
+    assert.match(process.env.DB_NAME, /^portal_kolab_test_[a-f0-9]{12}$/);
+    await db.query('DROP TABLE internships');
+    await migrate();
+    const [indexes] = await db.query('SHOW INDEX FROM internships');
+    for (const column of ['student_nim', 'startup_id', 'academic_supervisor_nip', 'status']) assert.ok(indexes.some(index => index.Column_name === column));
+  });
+  await request('/auth/register', { id: nim, role: 'STUDENT', name: 'Mahasiswa Magang', password }, null);
+  await request('/auth/register', { id: otherNim, role: 'STUDENT', name: 'Mahasiswa Kedua', password }, null);
+  await request('/auth/register', { id: nip, role: 'LECTURER', name: 'Dosen Pembimbing', lecturerCode: 'DP', password }, null);
+  startupId = (await bridge('manageStartup', { type: 'add', data: { name: 'Startup Magang' } })).id;
+  secondStartupId = (await bridge('manageStartup', { type: 'add', data: { name: 'Startup Kedua' } })).id;
+  valid = { studentNim: nim, startupId, startDate: '2026-09-01', endDate: '2026-12-31', fieldSupervisor: 'Pembimbing Lapangan', academicSupervisorNip: nip, status: 'PLANNED' };
+
+  await t.test('admin add persists all fields in MySQL', async () => {
+    const created = await write('add', valid, undefined);
+    id = created.id;
+    assert.match(id, /^internship-/);
+    const row = await stored(id);
+    assert.equal(row.student_nim, nim); assert.equal(row.startup_id, startupId);
+    assert.equal(row.start_date, valid.startDate); assert.equal(row.end_date, valid.endDate);
+    assert.equal(row.field_supervisor, valid.fieldSupervisor);
+    assert.equal(row.academic_supervisor_nip, nip); assert.equal(row.status, 'PLANNED');
+  });
+  await t.test('admin read joins correct names, NIM, NIP and lecturer code', async () => {
+    const row = (await rows()).find(row => row.id === id);
+    assert.equal(row.studentName, 'Mahasiswa Magang'); assert.equal(row.studentNim, nim);
+    assert.equal(row.startupName, 'Startup Magang'); assert.equal(row.startupId, startupId);
+    assert.equal(row.academicSupervisorName, 'Dosen Pembimbing'); assert.equal(row.academicSupervisorNip, nip);
+    assert.equal(row.academicSupervisorCode, 'DP'); assert.equal(row.startDate, valid.startDate);
+  });
+  await t.test('migration can run repeatedly without losing existing internships', async () => {
+    const before = await stored(id);
+    await migrate(); await migrate();
+    assert.deepEqual(await stored(id), before);
+  });
+
+  for (const [role, bearer] of [['STUDENT', studentToken], ['LECTURER', lecturerToken], ['unauthenticated', null], ['invalid JWT', 'invalid']]) {
+    const expected = bearer && bearer !== 'invalid' ? 403 : 401;
+    await t.test(`${role}: private GET returns ${expected}`, async () => {
+      await request('/data/internships', undefined, bearer, expected);
+    });
+    for (const type of ['add', 'edit', 'delete']) await t.test(`${role}: ${type} returns ${expected} without data/audit changes`, async () => {
+      const before = await stored(id), logs = await logCount();
+      await write(type, valid, type === 'add' ? undefined : id, bearer, expected);
+      assert.deepEqual(await stored(id), before); assert.equal(await logCount(), logs);
+    });
+  }
+
+  const invalidCases = [
+    ['missing student', { studentNim: '' }], ['unknown student', { studentNim: 'missing' }],
+    ['lecturer supplied as student', { studentNim: nip }], ['null student', { studentNim: null }],
+    ['missing startup', { startupId: '' }], ['unknown startup', { startupId: 'missing' }],
+    ['unknown academic supervisor', { academicSupervisorNip: 'missing' }],
+    ['student supplied as academic supervisor', { academicSupervisorNip: nim }],
+    ['missing start date', { startDate: '' }], ['missing end date', { endDate: '' }],
+    ['reversed dates', { endDate: '2026-08-31' }], ['impossible date', { startDate: '2026-02-30' }],
+    ['non-date timestamp', { startDate: '2026-09-01T00:00:00Z' }], ['invalid status', { status: 'ACTIVE' }],
+    ['null status', { status: null }], ['supervisor too long', { fieldSupervisor: 'x'.repeat(151) }]
+  ];
+  for (const [label, change] of invalidCases) await t.test(`reject ${label} for add and edit, leaving record and audit intact`, async () => {
+    const before = await stored(id), logs = await logCount();
+    await write('add', { ...valid, ...change }, undefined, token, 400);
+    await write('edit', { ...valid, ...change }, id, token, 400);
+    assert.deepEqual(await stored(id), before); assert.equal(await logCount(), logs);
+    assert.equal((await rows()).length, 1);
+  });
+
+  await t.test('active overlaps are rejected across startups, including touching date boundaries', async () => {
+    for (const status of ['PLANNED', 'ONGOING']) {
+      await write('add', { ...valid, startupId: secondStartupId, status }, undefined, token, 409);
+      await write('add', { ...valid, status, startDate: '2026-12-31', endDate: '2027-01-31' }, undefined, token, 409);
+    }
+    assert.equal((await rows()).length, 1);
+  });
+  await t.test('admin can edit every field and update without self-overlap', async () => {
+    await write('edit', { ...valid, studentNim: otherNim, startupId: secondStartupId, startDate: '2027-01-01', endDate: '2027-03-31', fieldSupervisor: 'Pembimbing Baru', academicSupervisorNip: '', status: 'ONGOING' });
+    const row = (await rows()).find(row => row.id === id);
+    assert.equal(row.studentNim, otherNim); assert.equal(row.studentName, 'Mahasiswa Kedua');
+    assert.equal(row.startupName, 'Startup Kedua'); assert.equal(row.startDate, '2027-01-01');
+    assert.equal(row.endDate, '2027-03-31'); assert.equal(row.fieldSupervisor, 'Pembimbing Baru');
+    assert.equal(row.academicSupervisorNip, null); assert.equal(row.status, 'ONGOING');
+    await write('edit', valid);
+  });
+  await t.test('partial edit preserves omitted fields and validates resulting full record', async () => {
+    await write('edit', { status: 'ONGOING' });
+    const row = await stored(id);
+    assert.equal(row.status, 'ONGOING'); assert.equal(row.startup_id, startupId);
+    await write('edit', { endDate: '2026-08-01' }, id, token, 400);
+    assert.deepEqual(await stored(id), row);
+  });
+  await t.test('non-overlapping period is allowed but changing it into overlap is rejected', async () => {
+    const second = await write('add', { ...valid, startDate: '2027-01-01', endDate: '2027-02-01' }, undefined);
+    const before = await stored(second.id);
+    await write('edit', valid, second.id, token, 409);
+    assert.deepEqual(await stored(second.id), before);
+    await write('delete', {}, second.id);
+  });
+  await t.test('completed/cancelled history may overlap; reactivation validates overlap', async () => {
+    for (const status of ['COMPLETED', 'CANCELLED']) {
+      const historical = await write('add', { ...valid, status }, undefined);
+      await write('edit', { status: 'ONGOING' }, historical.id, token, 409);
+      assert.equal((await stored(historical.id)).status, status);
+      await write('delete', {}, historical.id);
+    }
+  });
+  await t.test('concurrent overlapping requests commit exactly one record and one audit', async () => {
+    const logs = await logCount();
+    const payload = { action: 'manageInternship', type: 'add', data: { ...valid, studentNim: otherNim } };
+    const responses = await Promise.all([1, 2].map(() => fetch(base + '/bridge', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify(payload) })));
+    assert.deepEqual(responses.map(response => response.status).sort(), [200, 409]);
+    assert.equal(await logCount(), logs + 1);
+    const created = await responses.find(response => response.status === 200).json();
+    assert.equal((await rows()).filter(row => row.studentNim === otherNim).length, 1);
+    await write('delete', {}, created.id);
+  });
+  await t.test('failed audit causes add/edit/delete to roll back the record changes', async () => {
+    const before = await stored(id), logs = await logCount();
+    await db.query(`CREATE TRIGGER fail_internship_audit BEFORE INSERT ON system_logs FOR EACH ROW
+      BEGIN IF NEW.action = 'manageInternship' THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Test audit failure'; END IF; END`);
+    try {
+      await write('add', { ...valid, studentNim: otherNim }, undefined, token, 500);
+      await write('edit', { fieldSupervisor: 'Must rollback' }, id, token, 500);
+      await write('delete', {}, id, token, 500);
+    } finally { await db.query('DROP TRIGGER fail_internship_audit'); }
+    assert.deepEqual(await stored(id), before); assert.equal(await logCount(), logs);
+    assert.equal((await rows()).length, 1);
+  });
+  await t.test('audit details record the correct internship id and add/edit/delete type', async () => {
+    await write('delete', {});
+    assert.equal(await stored(id), undefined); assert.equal((await rows()).length, 0);
+    const [logs] = await db.execute("SELECT details FROM system_logs WHERE action='manageInternship' ORDER BY id");
+    const actions = logs.map(log => JSON.parse(log.details)).filter(log => log.id === id).map(log => log.type);
+    assert.equal(actions[0], 'add'); assert.ok(actions.includes('edit')); assert.equal(actions.at(-1), 'delete');
+  });
+  await t.test('missing record or invalid operation cannot report successful writes', async () => {
+    await write('edit', valid, 'missing-internship', token, 404);
+    await write('delete', {}, 'missing-internship', token, 404);
+    await write('bogus', valid, undefined, token, 400);
+  });
+  await t.test('default status and optional supervisors are stored by backend', async () => {
+    const created = await write('add', { studentNim: nim, startupId, startDate: '2026-09-01', endDate: '2026-09-01' }, undefined);
+    const row = await stored(created.id);
+    assert.equal(row.status, 'PLANNED'); assert.equal(row.field_supervisor, null); assert.equal(row.academic_supervisor_nip, null);
+    await write('delete', {}, created.id);
+  });
+  await t.test('existing deletion of a member/startup does not hide historical internship rows', async () => {
+    const created = await write('add', { ...valid, studentNim: otherNim, status: 'COMPLETED' }, undefined);
+    await bridge('manageMember', { type: 'delete', role: 'STUDENT', targetId: otherNim });
+    await bridge('manageStartup', { type: 'delete', id: startupId });
+    await bridge('manageMember', { type: 'delete', role: 'LECTURER', targetId: nip });
+    const row = (await rows()).find(row => row.id === created.id);
+    assert.equal(row.studentNim, otherNim); assert.equal(row.studentName, null);
+    assert.equal(row.startupId, startupId); assert.equal(row.startupName, null);
+    assert.equal(row.academicSupervisorNip, nip); assert.equal(row.academicSupervisorName, null);
+    await write('delete', {}, created.id);
+  });
+});

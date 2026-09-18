@@ -51,13 +51,15 @@ export const api = {
         case 'getEvents': endpoint = '/data/events'; break;
         case 'getArticles': endpoint = '/data/articles'; break;
         case 'getCategories': endpoint = '/data/categories'; break;
+        case 'getInternships': endpoint = '/data/internships'; break;
         default: endpoint = `/data/${action}`;
       }
 
       const url = `${API_BASE_URL}${endpoint}?t=${Date.now()}`;
       
       const response = await fetch(url, {
-        method: 'GET'
+        method: 'GET',
+        headers: this.getToken() ? { Authorization: 'Bearer ' + this.getToken() } : {}
       });
       
       if (!response.ok) {
@@ -69,6 +71,22 @@ export const api = {
       console.error(`GET request failed for [${action}]:`, error);
       return null;
     }
+  },
+  async getWorkloads() {
+    const response = await fetch(`${API_BASE_URL}/workloads?t=${Date.now()}`, { headers: this.getToken() ? { Authorization: 'Bearer ' + this.getToken() } : {} });
+    if (!response.ok) throw new Error('Data workload gagal dimuat.');
+    return response.json();
+  },
+  async getWorkloadSummary() {
+    const response = await fetch(`${API_BASE_URL}/workloads/member-summary?t=${Date.now()}`, { headers: this.getToken() ? { Authorization: 'Bearer ' + this.getToken() } : {} });
+    if (!response.ok) throw new Error('Ringkasan workload gagal dimuat.');
+    return response.json();
+  },
+  async workloadRequest(path: string, method: string, body?: unknown) {
+    const response = await fetch(`${API_BASE_URL}/workloads${path}`, { method, headers: { 'Content-Type': 'application/json', ...(this.getToken() ? { Authorization: 'Bearer ' + this.getToken() } : {}) }, body: body === undefined ? undefined : JSON.stringify(body) });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.message || 'Operasi workload gagal.');
+    return result;
   },
 
   /**
@@ -101,6 +119,87 @@ export const api = {
       if (!['login', 'register'].includes(action)) window.dispatchEvent(new CustomEvent('portal-api-error', { detail: message }));
       return { status: 'error', message };
     }
+  },
+  async memberImportPreview(file: File, role: 'STUDENT' | 'LECTURER', duplicateMode: 'skip' | 'update') {
+    const form = new FormData();
+    form.append('file', file);
+    form.append('role', role);
+    form.append('duplicateMode', duplicateMode);
+    const response = await fetch(`${API_BASE_URL}/admin/members/import/preview`, {
+      method: 'POST',
+      headers: this.getToken() ? { Authorization: 'Bearer ' + this.getToken() } : {},
+      body: form
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.message || 'Preview import gagal.');
+    return result;
+  },
+  async memberImportCommit(role: 'STUDENT' | 'LECTURER', rows: unknown[]) {
+    const response = await fetch(`${API_BASE_URL}/admin/members/import/commit`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(this.getToken() ? { Authorization: 'Bearer ' + this.getToken() } : {})
+      },
+      body: JSON.stringify({ role, rows })
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.message || 'Import gagal disimpan.');
+    return result;
+  },
+  async downloadMemberFile(role: 'STUDENT' | 'LECTURER', format: 'xlsx' | 'pdf', search = '') {
+    const params = new URLSearchParams({ format });
+    if (search.trim()) params.set('search', search.trim());
+    const response = await fetch(`${API_BASE_URL}/admin/members/export/${role.toLowerCase()}?${params}`, {
+      headers: this.getToken() ? { Authorization: 'Bearer ' + this.getToken() } : {}
+    });
+    if (!response.ok) {
+      const result = await response.json().catch(() => ({}));
+      throw new Error(result.message || 'Export gagal.');
+    }
+    return response.blob();
+  },
+  async downloadMemberTemplate(role: 'STUDENT' | 'LECTURER') {
+    const response = await fetch(`${API_BASE_URL}/admin/members/template/${role}`, {
+      headers: this.getToken() ? { Authorization: 'Bearer ' + this.getToken() } : {}
+    });
+    if (!response.ok) {
+      const result = await response.json().catch(() => ({}));
+      throw new Error(result.message || 'Template gagal diunduh.');
+    }
+    return response.blob();
+  },
+  async downloadInternshipTemplate() {
+    const response = await fetch(`${API_BASE_URL}/admin/internships/template`, {
+      headers: this.getToken() ? { Authorization: 'Bearer ' + this.getToken() } : {}
+    });
+    if (!response.ok) throw new Error('Template magang gagal diunduh.');
+    return response.blob();
+  },
+  async internshipImportPreview(file: File) {
+    const form = new FormData();
+    form.append('file', file);
+    const response = await fetch(`${API_BASE_URL}/admin/internships/import/preview`, {
+      method: 'POST',
+      headers: this.getToken() ? { Authorization: 'Bearer ' + this.getToken() } : {},
+      body: form
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.message || 'Preview import magang gagal.');
+    return result;
+  },
+  async internshipImportCommit(rows: unknown[]) {
+    const response = await fetch(`${API_BASE_URL}/admin/internships/import/commit`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(this.getToken() ? { Authorization: 'Bearer ' + this.getToken() } : {})
+      },
+      body: JSON.stringify({ rows })
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.message || 'Import magang gagal.');
+    return result;
   },
 
   /**

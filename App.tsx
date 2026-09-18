@@ -213,7 +213,7 @@ const App: React.FC = () => {
           {activeTab === 'events' && <EventsView events={events} isAdmin={isAdmin} currentUser={profile.name} userEmail={profile.email} onRefresh={loadBaseData} onShowAlert={showAlert} showConfirm={showConfirm} />}
           {activeTab === 'article' && <ArticleView articles={articles} categories={categories} isAdmin={isAdmin} currentUser={profile.name} onManageCategories={() => setActiveTab('content')} onAction={(t, id, d) => { if(t === 'delete') { showConfirm('Purge Article', 'Hapus artikel dari hub?', () => saveAndRefresh('manageArticle', { type: t, id, data: d })); } else { return saveAndRefresh('manageArticle', { type: t, id, data: d }); } }} onRefresh={loadBaseData} showConfirm={showConfirm} />}
           {activeTab === 'announcements' && <AnnouncementsView announcements={announcements} startups={startups} currentUser={profile.name} isAdmin={isAdmin} onRefresh={loadBaseData} showConfirm={showConfirm} />}
-          {activeTab === 'members' && <MemberManagementView startups={startups} onRefresh={loadBaseData} onShowAlert={showAlert} showConfirm={showConfirm} />}
+          {activeTab === 'members' && isAdmin && <MemberManagementView userRole={profile.role} startups={startups} onRefresh={loadBaseData} onShowAlert={showAlert} showConfirm={showConfirm} />}
           {activeTab === 'content' && isAdmin && <ContentManagementView startups={startups} onShowAlert={showAlert} />}
           {activeTab === 'settings' && <SettingsView assets={assets} setAssets={setAssets} onAssetUpload={handleFileUpload} onSaveAssets={async () => { if (await saveAndRefresh('updateAssets', { data: assets })) showAlert('Global Engine Synced', 'New assets deployed.', 'success'); }} />}
         </>

@@ -59,3 +59,113 @@ paths:
       responses:
         '200':
           description: OK
+
+  /data/internships:
+    get:
+      summary: Daftar magang dengan nama mahasiswa, startup, dan pembimbing (ADMIN)
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Array data magang dengan JOIN referensi existing
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Internship'
+        '401':
+          description: JWT tidak tersedia atau tidak valid
+        '403':
+          description: Role selain ADMIN
+  /bridge:
+    post:
+      summary: Write bridge existing, termasuk manageInternship (ADMIN)
+      description: Action existing tetap tersedia. manageInternship menerima add, edit, delete. Edit boleh parsial; seluruh hasil akhir tetap divalidasi. PLANNED/ONGOING mahasiswa yang sama tidak boleh bertabrakan, termasuk tanggal batas yang sama.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action, type]
+              properties:
+                action:
+                  type: string
+                  example: manageInternship
+                type:
+                  type: string
+                  enum: [add, edit, delete]
+                id:
+                  type: string
+                  description: Wajib untuk edit/delete
+                data:
+                  $ref: '#/components/schemas/InternshipInput'
+      responses:
+        '200':
+          description: Transaksi data dan audit berhasil di-commit
+        '400':
+          description: Referensi, tanggal, status, atau payload tidak valid
+        '401':
+          description: JWT tidak tersedia atau tidak valid
+        '403':
+          description: Role selain ADMIN untuk manageInternship
+        '404':
+          description: Data magang tidak ditemukan
+        '409':
+          description: Benturan periode magang aktif atau perubahan data bersamaan
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    InternshipInput:
+      type: object
+      properties:
+        studentNim:
+          type: string
+          maxLength: 20
+        startupId:
+          type: string
+          maxLength: 50
+        startDate:
+          type: string
+          format: date
+        endDate:
+          type: string
+          format: date
+        fieldSupervisor:
+          type: string
+          nullable: true
+          maxLength: 150
+        academicSupervisorNip:
+          type: string
+          nullable: true
+          maxLength: 20
+        status:
+          type: string
+          enum: [PLANNED, ONGOING, COMPLETED, CANCELLED]
+          default: PLANNED
+    Internship:
+      allOf:
+        - $ref: '#/components/schemas/InternshipInput'
+        - type: object
+          properties:
+            id:
+              type: string
+            studentName:
+              type: string
+              nullable: true
+            startupName:
+              type: string
+              nullable: true
+            academicSupervisorName:
+              type: string
+              nullable: true
+            academicSupervisorCode:
+              type: string
+              nullable: true
