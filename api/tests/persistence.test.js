@@ -19,6 +19,205 @@ async function request(path, body, bearer = token, expected = 200) {
   return result;
 }
 const bridge = (action, payload = {}, bearer = token, expected = 200) => request('/bridge', { ...payload, action }, bearer, expected);
+
+test('startup positions: migration, allowlist, leadership, edits, security and transfers', async t => {
+  const { migrateStartupPosition } = await import('../lib/startupPosition.js');
+  const XLSX = (await import('xlsx')).default;
+  const startup = 'position-startup', other = 'position-other';
+  await bridge('manageStartup', { type: 'add', id: startup, data: { name: 'KROOMBOX' } });
+  await bridge('manageStartup', { type: 'add', id: other, data: { name: 'NGOLAB' } });
+  const register = (id, position, startupId = startup, extra = {}, expected = 200, bearer = token) => request('/auth/register', { id, role: 'STUDENT', name: id, password, studentType: 'STARTUP', startupId, startupPosition: position, studentJobDesk: 'Backend & Infrastructure', ...extra }, bearer, expected);
+  const stored = async id => (await db.execute('SELECT * FROM students WHERE nim=?', [id]))[0][0];
+  const edit = (id, data, expected = 200, bearer = token) => bridge('manageMember', { type: 'updateIdentity', targetId: id, role: 'STUDENT', data }, bearer, expected);
+  const commit = rows => request('/admin/members/import/commit', { role: 'STUDENT', rows });
+  const preview = async (rows, positionHeader = 'startup_position') => {
+    const form = new FormData();
+    const csv = ['nim,name,type,startup_id,' + positionHeader, ...rows.map(row => row.join(','))].join('\n');
+    form.append('file', new Blob([csv], { type: 'text/csv' }), 'positions.csv');
+    form.append('role', 'STUDENT'); form.append('duplicateMode', 'update');
+    const response = await fetch(base + '/admin/members/import/preview', { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: form });
+    assert.equal(response.status, 200);
+    return response.json();
+  };
+
+  await t.test('migration adds missing column/index, defaults existing members, preserves job desk and repeats safely', async () => {
+    // Only alter the isolated disposable test database.
+    assert.match(process.env.DB_NAME, /^portal_kolab_test_[a-f0-9]{12}$/);
+    await db.query('ALTER TABLE students DROP INDEX idx_students_startup_position, DROP COLUMN startup_position');
+    await db.execute("INSERT INTO students (nim,name,password,type,startup_id,job_desk) VALUES ('legacy-position','Legacy','hash','STARTUP',?,'CEO / Backend')", [startup]);
+    await migrateStartupPosition(db);
+    assert.equal((await stored('legacy-position')).startup_position, 'MEMBER');
+    assert.equal((await stored('legacy-position')).job_desk, 'CEO / Backend');
+    await edit('legacy-position', { startupPosition: 'CTO' });
+    const before = await stored('legacy-position');
+    await migrateStartupPosition(db); await migrateStartupPosition(db);
+    assert.deepEqual(await stored('legacy-position'), before);
+    await edit('legacy-position', { startupPosition: 'MEMBER' });
+  });
+
+  for (const position of ['CEO', 'COO', 'CTO', 'CFO', 'CMO', 'MEMBER']) {
+    await t.test(`accept ${position} and serialize it`, async () => {
+      await register('pos-' + position, position);
+      assert.equal((await stored('pos-' + position)).startup_position, position);
+      const member = (await bridge('getStudents')).find(m => m.studentId === 'pos-' + position);
+      assert.equal(member.startupPosition, position);
+      assert.equal(member.studentJobDesk, 'Backend & Infrastructure');
+    });
+    if (position !== 'MEMBER') await t.test(`reject second ${position} without replacing occupant`, async () => {
+      const result = await register('dup-' + position, position, startup, {}, 400);
+      assert.match(result.message, new RegExp(`Posisi ${position} pada startup KROOMBOX sudah diisi oleh pos-${position}`));
+      assert.equal(await stored('dup-' + position), undefined);
+    });
+  }
+  await t.test('multiple MEMBER and CEO at a different startup are allowed', async () => {
+    await register('pos-member-2', 'MEMBER');
+    await register('pos-other-ceo', 'CEO', other);
+    assert.equal((await stored('pos-other-ceo')).startup_position, 'CEO');
+  });
+  await t.test('invalid positions return 400 for both create and edit', async () => {
+    for (const position of ['Boss', 'Manager', 'Leader', 'Founder', 'Backend', 'Developer', 'ceo', 'Anggota', {}, 3]) {
+      await register('pos-invalid', position, startup, {}, 400);
+      await edit('pos-MEMBER', { startupPosition: position }, 400);
+    }
+    assert.equal((await stored('pos-MEMBER')).startup_position, 'MEMBER');
+  });
+  await t.test('NON_STARTUP and student without startup always have NULL position', async () => {
+    await register('pos-non', 'CTO', startup, { studentType: 'NON_STARTUP' });
+    await register('pos-no-team', 'CEO', null);
+    assert.equal((await stored('pos-non')).startup_position, null);
+    assert.equal((await stored('pos-non')).startup_id, null);
+    assert.equal((await stored('pos-no-team')).startup_position, null);
+  });
+  await t.test('edit excludes itself, MEMBER to CTO and CTO to MEMBER preserve job desk', async () => {
+    await edit('pos-CTO', { name: 'CTO renamed', startupPosition: 'CTO' });
+    await edit('pos-CTO', { startupPosition: 'MEMBER' });
+    await edit('pos-MEMBER', { startupPosition: 'CTO' });
+    assert.equal((await stored('pos-MEMBER')).startup_position, 'CTO');
+    assert.equal((await stored('pos-MEMBER')).job_desk, 'Backend & Infrastructure');
+    await edit('pos-MEMBER', { startupPosition: 'MEMBER' });
+  });
+  await t.test('moving startup resets position and revalidates explicit C-level selection', async () => {
+    await edit('pos-CEO', { startupId: other, startupPosition: 'CEO' }, 400);
+    assert.equal((await stored('pos-CEO')).startup_id, startup);
+    await edit('pos-CEO', { startupId: other });
+    assert.equal((await stored('pos-CEO')).startup_position, 'MEMBER');
+    await edit('pos-CEO', { startupId: startup, startupPosition: 'CEO' });
+  });
+  await t.test('removing membership clears position atomically', async () => {
+    await edit('pos-CFO', { startupId: null });
+    assert.equal((await stored('pos-CFO')).startup_position, null);
+    await edit('pos-CMO', { studentType: 'NON_STARTUP' });
+    assert.equal((await stored('pos-CMO')).startup_id, null);
+    assert.equal((await stored('pos-CMO')).startup_position, null);
+  });
+  await t.test('concurrent C-level registration commits exactly one', async () => {
+    const responses = await Promise.all(['race-one', 'race-two'].map(id => fetch(base + '/auth/register', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ id, name: id, role: 'STUDENT', password, studentType: 'STARTUP', startupId: startup, startupPosition: 'CFO' })
+    })));
+    assert.deepEqual(responses.map(r => r.status).sort(), [200, 400]);
+    const [[count]] = await db.execute("SELECT COUNT(*) AS n FROM students WHERE startup_id=? AND startup_position='CFO'", [startup]);
+    assert.equal(count.n, 1);
+  });
+  await t.test('only ADMIN changes position; self profile rejects camelCase and snake_case', async () => {
+    const login = await request('/auth/login', { id: 'pos-MEMBER', role: 'STUDENT', password }, null);
+    for (const field of ['startupPosition', 'startup_position']) await bridge('updateProfile', { [field]: 'CEO' }, login.token, 403);
+    await edit('pos-MEMBER', { startupPosition: 'CEO' }, 403, login.token);
+    await register('pos-self-create', 'CEO', other, {}, 403, login.token);
+    await register('pos-public', 'CEO', other, {}, 403, null);
+    await bridge('updateProfile', { name: 'Self name', startupId: other, studentType: 'NON_STARTUP' }, login.token);
+    assert.equal((await stored('pos-MEMBER')).startup_id, startup);
+    assert.equal((await stored('pos-MEMBER')).startup_position, 'MEMBER');
+    await edit('pos-MEMBER', { startupPosition: 'CTO' });
+    const status = await request('/student/me/status', undefined, login.token);
+    assert.equal(status.startup.name, 'KROOMBOX'); assert.equal(status.startup.position, 'CTO');
+    assert.equal((await request('/auth/session', undefined, login.token)).profile.startupPosition, 'CTO');
+    await edit('pos-MEMBER', { startupPosition: 'MEMBER' });
+  });
+  await t.test('audit logs have minimal before/after metadata and roll back on audit failure', async () => {
+    const [logs] = await db.execute("SELECT details FROM system_logs WHERE action='updateStartupPosition'");
+    const change = logs.map(row => JSON.parse(row.details)).find(row => row.studentId === 'pos-MEMBER' && row.newPosition === 'CTO');
+    assert.deepEqual(change, { studentId: 'pos-MEMBER', startupId: startup, oldPosition: 'MEMBER', newPosition: 'CTO' });
+    const before = await stored('pos-MEMBER');
+    await db.query("CREATE TRIGGER fail_position_audit BEFORE INSERT ON system_logs FOR EACH ROW BEGIN IF NEW.action='updateStartupPosition' THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='Test position audit failure'; END IF; END");
+    try { await edit('pos-MEMBER', { startupPosition: 'CTO', name: 'Must roll back' }, 500); }
+    finally { await db.query('DROP TRIGGER fail_position_audit'); }
+    assert.deepEqual(await stored('pos-MEMBER'), before);
+  });
+  for (const alias of ['startup_position', 'posisi_startup', 'posisi', 'startup position']) await t.test(`import recognizes ${alias} and normalizes Anggota`, async () => {
+    const result = await preview([['alias', 'Alias', 'STARTUP', startup, 'anggota']], alias);
+    assert.equal(result.rows[0].startup_position, 'MEMBER'); assert.equal(result.rows[0].status, 'VALID');
+  });
+  await t.test('import defaults blanks, accepts CEO, rejects invalid and duplicate C-level within file', async () => {
+    const result = await preview([
+      ['imp-member', 'Imported Member', 'STARTUP', startup, 'member'],
+      ['imp-blank', 'Blank', 'STARTUP', startup, ''],
+      ['imp-ceo', 'Imported CEO', 'STARTUP', other, 'CEO'],
+      ['imp-cmo', 'First CMO', 'STARTUP', startup, 'cmo'],
+      ['imp-cmo-2', 'Second CMO', 'STARTUP', startup, 'CMO'],
+      ['imp-invalid', 'Invalid', 'STARTUP', startup, 'Boss']
+    ]);
+    assert.deepEqual(result.rows.map(r => r.status), ['VALID', 'VALID', 'INVALID', 'VALID', 'INVALID', 'INVALID']);
+    assert.match(result.rows[2].errors.join(), /sudah diisi oleh/);
+    assert.match(result.rows[4].errors.join(), /First CMO/);
+    assert.equal(result.rows[1].startup_position, 'MEMBER');
+    const summary = await commit(result.rows);
+    assert.equal(summary.imported, 3); assert.equal(summary.failed, 3);
+    await edit('pos-other-ceo', { startupPosition: 'MEMBER' });
+    const valid = await preview([['imp-ceo', 'Imported CEO', 'STARTUP', other, 'Ceo']]);
+    assert.equal((await commit(valid.rows)).imported, 1);
+    assert.equal((await stored('imp-ceo')).startup_position, 'CEO');
+  });
+  await t.test('import commit revalidates forged or stale preview and excludes current student on update', async () => {
+    const result = await commit([
+      { nim: 'forged-ceo', name: 'Forged', type: 'STARTUP', startup_id: other, startup_position: 'CEO', status: 'VALID' },
+      { nim: 'forged-invalid', name: 'Forged', type: 'STARTUP', startup_id: startup, startup_position: 'Boss', status: 'VALID' },
+      { nim: 'imp-ceo', name: 'Updated CEO', type: 'STARTUP', startup_id: other, startup_position: 'CEO', status: 'DUPLICATE', action: 'update' }
+    ]);
+    assert.equal(result.failed, 2); assert.equal(result.updated, 1);
+    assert.equal(await stored('forged-ceo'), undefined);
+    const cleared = await commit([{ nim: 'imp-ceo', name: 'No startup', type: 'NON_STARTUP', startup_position: 'CEO', action: 'update' }]);
+    assert.equal(cleared.updated, 1); assert.equal((await stored('imp-ceo')).startup_position, null);
+  });
+  await t.test('import preview accepts existing non-startup with omitted startup and marks missing NIM invalid', async () => {
+    const form = new FormData();
+    form.append('file', new Blob(['nim,name\npos-non,Non Startup\n,Missing NIM'], { type: 'text/csv' }), 'minimal.csv');
+    form.append('role', 'STUDENT'); form.append('duplicateMode', 'update');
+    const response = await fetch(base + '/admin/members/import/preview', { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: form });
+    assert.equal(response.status, 200);
+    const result = await response.json();
+    assert.equal(result.rows[0].status, 'DUPLICATE'); assert.equal(result.rows[0].startup_position, null);
+    assert.equal(result.rows[1].status, 'INVALID'); assert.match(result.rows[1].errors.join(), /NIM kosong/);
+  });
+  await t.test('bulk allows MEMBER in same startup and rejects C-level or mixed startups', async () => {
+    const members = ['pos-MEMBER', 'pos-member-2'].map(id => ({ id, role: 'STUDENT' }));
+    await bridge('bulkManageMembers', { bulkAction: 'edit', members, data: { startupPosition: 'CEO' } }, token, 400);
+    await bridge('bulkManageMembers', { bulkAction: 'edit', members, data: { startupPosition: 'MEMBER' } });
+    await bridge('bulkManageMembers', { bulkAction: 'edit', members: [...members, { id: 'pos-other-ceo', role: 'STUDENT' }], data: { startupPosition: 'MEMBER' } }, token, 400);
+  });
+  await t.test('template and Excel/PDF export include positions while preserving Job Desk and lecturer schema', async () => {
+    async function download(path) {
+      const response = await fetch(base + path, { headers: { Authorization: `Bearer ${token}` } });
+      assert.equal(response.status, 200); return Buffer.from(await response.arrayBuffer());
+    }
+    const sheet = buffer => { const book = XLSX.read(buffer); return XLSX.utils.sheet_to_json(book.Sheets[book.SheetNames[0]]); };
+    assert.ok('startup_position' in sheet(await download('/admin/members/template/STUDENT'))[0]);
+    const exported = sheet(await download('/admin/members/export/STUDENT?format=xlsx&search=pos-MEMBER'));
+    assert.equal(exported[0]['Posisi Startup'], 'Anggota');
+    assert.equal(exported[0]['Job Desk'], 'Backend & Infrastructure');
+    assert.ok('Status Magang' in exported[0]); assert.ok('Active Workload' in exported[0]);
+    assert.match((await download('/admin/members/export/STUDENT?format=pdf')).subarray(0, 8).toString(), /%PDF/);
+    assert.ok(!('startup_position' in sheet(await download('/admin/members/template/LECTURER'))[0]));
+  });
+  await t.test('startup deletion clears membership and position without losing job desk', async () => {
+    await bridge('manageStartup', { type: 'delete', id: startup });
+    const row = await stored('pos-MEMBER');
+    assert.equal(row.type, 'NON_STARTUP'); assert.equal(row.startup_id, null); assert.equal(row.startup_position, null);
+    assert.equal(row.job_desk, 'Backend & Infrastructure');
+  });
+  await bridge('manageStartup', { type: 'delete', id: other });
+  await db.execute("DELETE FROM students WHERE nim LIKE 'pos-%' OR nim LIKE 'imp-%' OR nim LIKE 'race-%' OR nim='legacy-position'");
+});
 before(async () => {
   control = await mysql.createConnection({ host: process.env.DB_HOST, port: Number(process.env.DB_PORT || 3306), user: process.env.DB_USER, password: process.env.DB_PASSWORD, multipleStatements: true });
   await control.query(`CREATE DATABASE \`${database}\` CHARACTER SET utf8mb4`);
@@ -38,6 +237,7 @@ before(async () => {
   process.env.GAS_URL = `http://127.0.0.1:${provider.address().port}`;
   const app = (await import('../server.js')).default;
   db = (await import('../lib/db.js')).default;
+  await (await import('../scripts/migrate.js')).migrate();
   server = app.listen(0, '127.0.0.1');
   await new Promise(resolve => server.once('listening', resolve));
   base = `http://127.0.0.1:${server.address().port}/api`;
@@ -54,6 +254,34 @@ after(async () => {
     await control.query(`DROP DATABASE \`${database}\``);
     await control.end();
   }
+});
+
+test('bulk internships reject lecturer targets and preserve student records', async () => {
+  const nim = 'bulk-student', nip = 'bulk-lecturer';
+  await db.execute('INSERT INTO students (nim,name,password) VALUES (?,?,?)', [nim, 'Bulk student', password]);
+  await db.execute('INSERT INTO lecturers (nip,name,password) VALUES (?,?,?)', [nip, 'Bulk lecturer', password]);
+  const startupId = (await bridge('manageStartup', { type: 'add', data: { name: 'Bulk startup' } })).id;
+  const valid = { role: 'STUDENT', studentNim: nim, startupId, startDate: '2026-01-01', endDate: '2026-02-01', status: 'PLANNED' };
+  await bridge('manageInternshipsBulk', { operation: 'create', internships: [valid] });
+  const stored = async () => (await db.execute('SELECT * FROM internships WHERE student_nim=?', [nim]))[0];
+  const before = await stored();
+  for (const operation of ['create', 'status', 'delete']) {
+    for (const invalid of [{ ...valid, role: 'LECTURER' }, { ...valid, studentNim: nip }, null]) {
+      await bridge('manageInternshipsBulk', { operation, internships: [{ ...valid, status: 'COMPLETED' }, invalid] }, token, 400);
+      assert.deepEqual(await stored(), before);
+    }
+    await bridge('manageInternshipsBulk', { operation, role: 'LECTURER', internships: [valid] }, token, 400);
+  }
+  for (const bulkAction of ['', 'assignInternship', 'internshipStatus', 'completeInternship', 'removeInternship']) {
+    await bridge('bulkManageMembers', { bulkAction, members: [{ role: 'LECTURER', id: nip }] }, token, 400);
+  }
+  await bridge('manageInternshipsBulk', { operation: 'status', internships: [{ ...valid, status: 'COMPLETED' }] });
+  assert.equal((await stored())[0].status, 'COMPLETED');
+  await bridge('manageInternshipsBulk', { operation: 'delete', internships: [valid] });
+  assert.equal((await stored()).length, 0);
+  await bridge('manageMember', { type: 'delete', role: 'STUDENT', targetId: nim });
+  await bridge('manageMember', { type: 'delete', role: 'LECTURER', targetId: nip });
+  await bridge('manageStartup', { type: 'delete', id: startupId });
 });
 
 test('registration, login, profile, password and fresh session for each role', async () => {
@@ -79,19 +307,21 @@ test('registration, login, profile, password and fresh session for each role', a
 });
 
 test('member administration persists identity, password, quota and deletion', async () => {
+  await bridge('manageStartup', { type: 'add', id: 'startup', data: { name: 'Member Startup' } });
   for (const role of ['STUDENT', 'LECTURER']) {
     const targetId = role === 'STUDENT' ? 'test-student' : 'test-lecturer';
     await bridge('manageMember', { type: 'updateIdentity', targetId, role, data: { name: 'Edited', password, studentType: 'STARTUP', startupId: 'startup', studentJobDesk: 'PIC Lab', lecturerCode: 'CODE' } });
     await request('/auth/login', { id: targetId, role, password }, null);
     await bridge('updateMemberStorage', { targetId, role, customQuota: 1000000, customMaxUpload: 500000 });
-    const members = await bridge('getAllMembers');
+    const members = await bridge(role === 'STUDENT' ? 'getStudents' : 'getLecturers');
     const member = members.find(m => m.studentId === targetId);
     assert.equal(member.customQuota, 1000000);
     assert.equal(member.name, 'Edited');
   }
+  await bridge('manageStartup', { type: 'delete', id: 'startup' });
   await request('/auth/register', { id: 'delete-me', role: 'STUDENT', name: 'Delete', password }, null);
   await bridge('manageMember', { type: 'delete', targetId: 'delete-me', role: 'STUDENT' });
-  assert.equal((await bridge('getAllMembers')).some(m => m.studentId === 'delete-me'), false);
+  assert.equal((await bridge('getStudents')).some(m => m.studentId === 'delete-me'), false);
 });
 
 const fixtures = [
@@ -100,6 +330,7 @@ const fixtures = [
   ['manageSchedule', 'schedules', 'schedules', { title: 'Meeting', date: '2026-09-17', time: '10:30', endTime: '11:30', locationOffline: 'Lab', locationOnline: true, meetLink: 'https://meet.example', organizer: 'Administrator', description: 'Body', author: 'Admin' }, 'title'],
   ['manageEvent', 'events', 'events', { title: 'Event', date: '2026-09-17', time: '10:30', image: 'image', description: 'Body', locationOffline: 'Lab', locationOnline: 'Yes', maxParticipants: 20, status: 'OPEN', tags: ['tag,with comma', 'two'], meetLink: 'meet', author: 'Admin' }, 'title'],
   ['manageCategory', 'categories', 'article_categories', { name: 'Category' }, 'name'],
+  ['manageTag', 'tags', 'article_tags', { name: 'Tag Artikel' }, 'name'],
   ['manageArticle', 'articles', 'articles', { title: 'Article', date: '2026-09-17', content: '<p>Konten</p>', author: 'Admin', tags: ['tag,with comma', 'two'], categoryId: 'category', imageUrl: 'image', videoUrl: 'video', otherUrl: 'other' }, 'title']
 ];
 for (const [action, endpoint, table, data, property] of fixtures) {
@@ -252,7 +483,7 @@ test('migration imports all collections and rolls back invalid data (local provi
     getAnnouncements: [{ id: 'import-ann', author: 'Import', title: 'Import', content: 'Text', createdAt: '2026-09-17T00:00:00Z', target: { type: 'ALL', value: '' } }]
   };
   for (const [, endpoint, , data] of fixtures) {
-    const action = { startups: 'getStartups', informasi: 'getInformasi', schedules: 'getSchedules', events: 'getEvents', categories: 'getCategories', articles: 'getArticles' }[endpoint];
+    const action = { startups: 'getStartups', informasi: 'getInformasi', schedules: 'getSchedules', events: 'getEvents', categories: 'getCategories', tags: 'getTags', articles: 'getArticles' }[endpoint];
     migrationData[action] = [{ ...data, id: 'import-' + endpoint }];
   }
   await request('/migration/pull', { gasUrl: process.env.GAS_URL });
@@ -438,4 +669,75 @@ test('internships: admin CRUD, validation, authorization, overlap and atomic aud
     assert.equal(row.academicSupervisorNip, nip); assert.equal(row.academicSupervisorName, null);
     await write('delete', {}, created.id);
   });
+});
+
+
+test('student self status: authorization, isolation, master joins, priorities and counts', async () => {
+ const { migrate } = await import('../scripts/migrate.js'); await migrate();
+ const jwt = (await import('jsonwebtoken')).default;
+ const sign=(id,role='STUDENT')=>jwt.sign({id,role},process.env.JWT_SECRET,{expiresIn:'1h'});
+ await db.execute("INSERT INTO startup_teams (id,name,logo,website,ig) VALUES ('self-startup','Self Startup','logo','https://example.com','self')");
+ await db.execute("INSERT INTO students (nim,name,password,startup_id,type,job_desk,is_active,is_approved) VALUES ('self-a','Student A','secret','self-startup','STARTUP','Backend',1,0),('self-b','Student B','other-secret',NULL,'NON_STARTUP',NULL,1,1)");
+ await db.execute("INSERT INTO lecturers (nip,name,password) VALUES ('self-supervisor','Academic Supervisor','secret')");
+ const a=sign('self-a'), b=sign('self-b');
+ await request('/student/me/status',undefined,null,401);
+ await request('/student/me/status',undefined,sign('self-supervisor','LECTURER'),403);
+ await request('/student/me/status',undefined,token,403);
+ const empty=await request('/student/me/status',undefined,b);
+ assert.equal(empty.profile.nim,'self-b'); assert.equal(empty.startup,null);
+ assert.equal(empty.internship.current,null); assert.deepEqual(empty.internship.history,[]);
+ assert.equal(empty.workload.activeLoad,0); assert.deepEqual(empty.workload.active,[]);
+ for (const [id,status,end] of [['self-completed','COMPLETED','2025-12-31'],['self-cancelled','CANCELLED','2027-12-31'],['self-planned','PLANNED','2027-06-30'],['self-ongoing','ONGOING','2026-12-31']]) {
+  await db.execute('INSERT INTO internships (id,student_nim,startup_id,start_date,end_date,status,academic_supervisor_nip,field_supervisor) VALUES (?,?,?,?,?,?,?,?)',[id,'self-a','self-startup','2025-01-01',end,status,'self-supervisor','Field Supervisor']);
+ }
+ for(const [id,status,category,role,member] of [['self-w1','ACTIVE','PROJECT','STUDENT','self-a'],['self-w2','ACTIVE','RESEARCH','STUDENT','self-a'],['self-w3','COMPLETED','PKM','STUDENT','self-a'],['self-w4','CANCELLED','COMPETITION','STUDENT','self-a'],['self-w5','PLANNED','PROJECT','STUDENT','self-a'],['self-w6','ACTIVE','PKM','STUDENT','self-b'],['self-w7','ACTIVE','PKM','LECTURER','self-a']]) {
+  await db.execute('INSERT INTO workloads (id,name,category,status,pic_id,pic_role,description) VALUES (?,?,?,?,?,?,?)',[id,id,category,status,'self-supervisor','LECTURER','Description']);
+  await db.execute('INSERT INTO workload_members (id,workload_id,member_id,member_role,job_desk) VALUES (?,?,?,?,?)',[id,id,member,role,'My job desk']);
+ }
+ const result=await request('/student/me/status?nim=self-b&studentId=self-b&memberId=self-b',undefined,a);
+ assert.equal(result.profile.nim,'self-a'); assert.equal(result.profile.name,'Student A');
+ assert.equal(result.membership.isApproved,false); assert.equal(result.membership.isActive,true);
+ assert.equal(result.membership.jobDesk,'Backend'); assert.equal(result.membership.studentType,'STARTUP');
+ assert.equal(result.startup.id,'self-startup'); assert.equal(result.startup.name,'Self Startup');
+ assert.equal(result.internship.current.id,'self-ongoing');
+ assert.equal(result.internship.current.academicSupervisorName,'Academic Supervisor');
+ assert.equal(result.internship.current.fieldSupervisor,'Field Supervisor');
+ assert.ok(result.internship.history.some(i=>i.id==='self-completed'));
+ assert.equal(result.workload.activeLoad,2); assert.equal(result.workload.totalHistory,2);
+ assert.deepEqual(result.workload.categoryLoad,{PKM:0,PROJECT:1,RESEARCH:1,COMPETITION:0});
+ assert.equal(result.workload.history.length,2); assert.equal(result.workload.planned.length,1);
+ assert.ok(result.workload.active.every(w=>w.jobDesk==='My job desk' && w.picName==='Academic Supervisor' && w.picRole==='LECTURER'));
+ assert.ok(result.workload.history.some(w=>w.id==='self-w3'));
+ assert.doesNotMatch(JSON.stringify(result),/password|hash|secret|quota|createdBy|audit|token/i);
+ await db.execute("DELETE FROM internships WHERE id='self-ongoing'");
+ assert.equal((await request('/student/me/status',undefined,a)).internship.current.id,'self-planned');
+ await db.execute("DELETE FROM internships WHERE id='self-planned'");
+ assert.equal((await request('/student/me/status',undefined,a)).internship.current.id,'self-completed');
+ await db.execute("DELETE FROM internships WHERE id='self-completed'");
+ assert.equal((await request('/student/me/status',undefined,a)).internship.current.id,'self-cancelled');
+});
+
+test('lecturer portal is read-only, scoped to lecturer and excludes sensitive student fields', async () => {
+  const { migrate } = await import('../scripts/migrate.js'); await migrate();
+  const suffix = crypto.randomBytes(4).toString('hex');
+  const nip = `lect-${suffix}`, nim = `stud-${suffix}`, startupId = `startup-${suffix}`, workloadId = `workload-${suffix}`;
+  await db.execute('INSERT INTO lecturers (nip,name,password,code,is_active,is_approved) VALUES (?,?,?,?,1,1)', [nip, 'Lecturer Portal', crypto.createHash('sha256').update(password).digest('hex'), 'LPR']);
+  await db.execute('INSERT INTO students (nim,name,password,type,startup_id,startup_position,is_active,is_approved) VALUES (?,?,?,?,?,?,1,1)', [nim, 'Student Portal', 'secret-value', 'STARTUP', startupId, 'CTO']);
+  await db.execute('INSERT INTO startup_teams (id,name) VALUES (?,?)', [startupId, 'Portal Startup']);
+  await db.execute('INSERT INTO internships (id,student_nim,startup_id,start_date,end_date,status,academic_supervisor_nip) VALUES (?,?,?,?,?,?,?)', [`intern-${suffix}`, nim, startupId, '2026-01-01', '2026-12-31', 'ONGOING', nip]);
+  await db.execute('INSERT INTO workloads (id,name,category,status,pic_id,pic_role) VALUES (?,?,?,?,?,?)', [workloadId, 'Portal Workload', 'PROJECT', 'ACTIVE', nip, 'LECTURER']);
+  await db.execute('INSERT INTO workload_members (id,workload_id,member_id,member_role) VALUES (?,?,?,?)', [`member-${suffix}`, workloadId, nim, 'STUDENT']);
+  const lecturerToken = (await request('/auth/login', { id: nip, role: 'LECTURER', password }, null)).token;
+  const students = await request('/lecturer/students', undefined, lecturerToken);
+  assert.equal(students.find(row => row.nim === nim).startup.position, 'CTO');
+  assert.equal(students.find(row => row.nim === nim).activeWorkload, 1);
+  const detail = await request(`/lecturer/students/${nim}`, undefined, lecturerToken);
+  assert.equal(detail.identity.name, 'Student Portal');
+  assert.doesNotMatch(JSON.stringify(detail), /secret-value|password|quota|jwt|hash/i);
+  assert.equal((await request('/lecturer/supervisions', undefined, lecturerToken)).find(row => row.student_nim === nim).status, 'ONGOING');
+  const workloads = await request('/lecturer/workloads', undefined, lecturerToken);
+  assert.equal(workloads.asPic.find(row => row.id === workloadId).member_count, 1);
+  assert.equal(workloads.asMember.length, 0);
+  await request('/lecturer/students', undefined, token, 403);
+  await bridge('manageMember', { type: 'updateIdentity', targetId: nim, role: 'STUDENT', data: { name: 'Must fail' } }, lecturerToken, 403);
 });

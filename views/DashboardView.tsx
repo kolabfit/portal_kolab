@@ -1,3 +1,5 @@
+import { StudentStatusSummary } from './StudentStatusView';
+import { StudentStatusState } from '../services/useStudentStatus';
 
 import React, { useState } from 'react';
 import { 
@@ -6,9 +8,10 @@ import {
   ShieldCheck, Zap, Megaphone, Rocket, Database, Activity, Target, RefreshCw
 } from 'lucide-react';
 import VirtualIDCard from '../components/VirtualIDCard';
-import { UserProfile, Schedule, AppAssets, Event, NewsInfo, UserRole, Announcement, Informasi, StartupTeam } from '../types';
+import { UserProfile, Schedule, AppAssets, Event, NewsInfo, UserRole, Announcement, Informasi, StartupTeam, LecturerOverview } from '../types';
 
 interface DashboardViewProps {
+  studentStatus: StudentStatusState;
   profile: UserProfile;
   assets: AppAssets;
   meetings: Schedule[];
@@ -19,11 +22,12 @@ interface DashboardViewProps {
   startups: StartupTeam[];
   setActiveTab: (tab: string) => void;
   onRefresh?: () => void;
+  lecturerOverview?: LecturerOverview | null;
 }
 
 const DashboardView: React.FC<DashboardViewProps> = ({ 
-  profile, assets, meetings, events, news, 
-  announcements, informasiList, startups, setActiveTab, onRefresh
+  studentStatus, profile, assets, meetings, events, news, 
+  announcements, informasiList, startups, setActiveTab, onRefresh, lecturerOverview
 }) => {
   const [isSyncing, setIsSyncing] = useState(false);
   const isAdmin = profile.role === UserRole.ADMIN;
@@ -31,6 +35,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({
   const handleRefresh = async () => {
     if (!onRefresh) return;
     setIsSyncing(true);
+    if (profile.role === UserRole.STUDENT) studentStatus.retry();
     await onRefresh();
     setTimeout(() => setIsSyncing(false), 600);
   };
@@ -71,6 +76,20 @@ const DashboardView: React.FC<DashboardViewProps> = ({
         </button>
       </div>
 
+      {profile.role === UserRole.STUDENT && <StudentStatusSummary state={studentStatus} onOpen={() => setActiveTab('student-status')} />}
+      {profile.role === UserRole.LECTURER && lecturerOverview && <div className="space-y-5">
+        <div><h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em]">Monitoring Dosen</h3><p className="text-2xl font-black tracking-tight mt-2">Profil Ko+Lab Saya</p></div>
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+          {[
+            ['Total Mahasiswa', lecturerOverview.summary.totalStudents],
+            ['Bimbingan Saya', lecturerOverview.summary.totalSupervisions],
+            ['Bimbingan Aktif', lecturerOverview.summary.activeSupervisions],
+            ['Workload PIC', lecturerOverview.summary.workloadsAsPic],
+            ['Workload Aktif', lecturerOverview.summary.activeWorkloads]
+          ].map(([label, value]) => <div key={String(label)} className="bg-white rounded-2xl p-5 border border-slate-100 shadow-sm"><p className="text-[9px] font-black uppercase tracking-widest text-slate-400">{label}</p><p className="text-3xl font-black mt-2">{value}</p></div>)}
+        </div>
+        <div className="bg-slate-900 text-white rounded-[2rem] p-6 lg:p-8 flex flex-wrap gap-x-10 gap-y-5"><div><p className="text-[9px] uppercase tracking-widest text-slate-400">Nama</p><p className="font-black mt-1">{lecturerOverview.lecturer.name}</p></div><div><p className="text-[9px] uppercase tracking-widest text-slate-400">NIP</p><p className="font-black mt-1">{lecturerOverview.lecturer.nip}</p></div><div><p className="text-[9px] uppercase tracking-widest text-slate-400">Kode Dosen</p><p className="font-black mt-1">{lecturerOverview.lecturer.code || '-'}</p></div><div><p className="text-[9px] uppercase tracking-widest text-slate-400">Status Member</p><p className="font-black mt-1 text-emerald-400">{lecturerOverview.lecturer.isActive ? 'Aktif' : 'Tidak Aktif'}</p></div><div className="flex gap-2 items-end"><button onClick={() => setActiveTab('lecturer-students')} className="px-4 py-2 bg-orange-600 rounded-xl text-[9px] font-black uppercase">Lihat Mahasiswa</button><button onClick={() => setActiveTab('lecturer-supervisions')} className="px-4 py-2 bg-white/10 rounded-xl text-[9px] font-black uppercase">Bimbingan Saya</button></div></div>
+      </div>}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-10 items-start">
         {/* LEFT COLUMN: IDENTITY */}
         <div className="lg:col-span-4 space-y-8 lg:space-y-10">

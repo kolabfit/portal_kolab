@@ -1,21 +1,20 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { 
-  FileText, Calendar, Info, Tags, Search, Plus, Edit2, Trash2, 
+  FileText, Calendar, Info, Tag, Tags, Search, Plus, Edit2, Trash2, 
   ChevronLeft, ChevronRight, ArrowUpDown, Filter, Save, X 
 } from 'lucide-react';
-import { Informasi, Schedule, Article, ArticleCategory, StartupTeam } from '../types';
+import { ArticleCategory } from '../types';
 import { api } from '../api';
 import Modal from '../components/Modal';
 import { TablePagination } from '../components/TableControls';
 
 interface ContentManagementViewProps {
-  startups: StartupTeam[];
   onShowAlert: (title: string, msg: string, type: any) => void;
 }
 
-const ContentManagementView: React.FC<ContentManagementViewProps> = ({ startups, onShowAlert }) => {
-  const [activeTab, setActiveTab] = useState<'informasi' | 'schedules' | 'articles' | 'categories'>('informasi');
+const ContentManagementView: React.FC<ContentManagementViewProps> = ({ onShowAlert }) => {
+  const [activeTab, setActiveTab] = useState<'informasi' | 'schedules' | 'articles' | 'categories' | 'tags'>('categories');
   const [data, setData] = useState<any[]>([]);
   const [categories, setCategories] = useState<ArticleCategory[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -42,6 +41,7 @@ const ContentManagementView: React.FC<ContentManagementViewProps> = ({ startups,
     else if (activeTab === 'schedules') result = await api.getData('getSchedules');
     else if (activeTab === 'articles') result = await api.getData('getArticles');
     else if (activeTab === 'categories') result = await api.getData('getCategories');
+      else if (activeTab === 'tags') result = await api.getData('getTags');
     
     if (activeTab === 'articles' || activeTab === 'categories') {
        const cats = await api.getData('getCategories');
@@ -60,7 +60,7 @@ const ContentManagementView: React.FC<ContentManagementViewProps> = ({ startups,
       .filter(item => Object.entries(columnFilters).every(([key, value]) => {
         if (!value) return true;
         const source = key === 'descriptor' ? (item.title || item.name) : key === 'author' ? (item.author || item.organizer) : item[key];
-        return String(source ?? '').toLowerCase().includes(value.toLowerCase());
+        return String(source ?? '').toLowerCase().includes(String(value).toLowerCase());
       }));
     if (sortKey) {
       filtered.sort((a, b) => {
@@ -82,7 +82,8 @@ const ContentManagementView: React.FC<ContentManagementViewProps> = ({ startups,
       informasi: 'manageInformasi',
       schedules: 'manageSchedule',
       articles: 'manageArticle',
-      categories: 'manageCategory'
+      categories: 'manageCategory',
+        tags: 'manageTag'
     };
     
     const res = await api.postData(actionMap[activeTab], { type, id, data: payload });
@@ -112,40 +113,20 @@ const ContentManagementView: React.FC<ContentManagementViewProps> = ({ startups,
         handleAction(editingItem ? 'edit' : 'add', editingItem?.id, payload);
       }} className="space-y-6">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {activeTab !== 'categories' && (
+          {(activeTab !== 'categories' && activeTab !== 'tags') && (
             <div className="md:col-span-2">
               <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block px-2">Judul / Headline</label>
               <input name="title" defaultValue={item.title} required className="w-full px-6 py-4 bg-slate-50 border-0 rounded-2xl font-bold focus:ring-4 focus:ring-orange-100 outline-none" />
             </div>
           )}
           
-          {activeTab === 'categories' && (
+          {(activeTab === 'categories' || activeTab === 'tags') && (
             <div className="md:col-span-2">
-              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block px-2">Kategori Name</label>
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block px-2">
+                {activeTab === 'categories' ? 'Nama Kategori' : 'Nama Tag'}
+              </label>
               <input name="name" defaultValue={item.name} required className="w-full px-6 py-4 bg-slate-50 border-0 rounded-2xl font-bold focus:ring-4 focus:ring-orange-100 outline-none" />
             </div>
-          )}
-
-          {activeTab === 'informasi' && (
-            <>
-              <div>
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block px-2">Tujuan Segment</label>
-                <select name="targetType" defaultValue={item.targetType || 'ALL'} className="w-full px-6 py-4 bg-slate-50 border-0 rounded-2xl font-bold outline-none">
-                  <option value="ALL">Semua Member HUB</option>
-                  <option value="ROLE_STUDENT">Khusus Mahasiswa</option>
-                  <option value="ROLE_LECTURER">Khusus Dosen</option>
-                  <option value="STARTUP_ALL">Semua Tim Startup</option>
-                  <option value="STARTUP_SPECIFIC">Spesifik Tim Startup</option>
-                </select>
-              </div>
-              <div>
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block px-2">Target Value (Startup ID)</label>
-                <select name="targetValue" defaultValue={item.targetValue} className="w-full px-6 py-4 bg-slate-50 border-0 rounded-2xl font-bold outline-none">
-                  <option value="">Tidak Ada</option>
-                  {startups.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                </select>
-              </div>
-            </>
           )}
 
           {(activeTab === 'informasi' || activeTab === 'articles') && <input type="date" name="date" required defaultValue={item.date?.slice(0, 10) || new Date().toISOString().slice(0, 10)} className="px-6 py-4 bg-slate-50 rounded-2xl" />}
@@ -185,7 +166,7 @@ const ContentManagementView: React.FC<ContentManagementViewProps> = ({ startups,
             </>
           )}
 
-          {activeTab !== 'categories' && (
+          {(activeTab !== 'categories' && activeTab !== 'tags') && (
              <>
                 <div className="md:col-span-2">
                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block px-2">Penulis</label>
@@ -210,12 +191,10 @@ const ContentManagementView: React.FC<ContentManagementViewProps> = ({ startups,
     <div className="space-y-12 animate-in fade-in slide-in-from-bottom-8 duration-700 pb-20">
       <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-8">
         <div>
-          <h2 className="text-5xl font-black text-slate-900 tracking-tighter">Content Hub</h2>
+          <h2 className="text-5xl font-black text-slate-900 tracking-tighter">Kategori & Tag Artikel</h2>
           <div className="flex flex-wrap gap-3 mt-6">
-            <button onClick={() => setActiveTab('informasi')} className={`px-6 py-3 rounded-xl font-black text-[9px] uppercase tracking-widest transition-all flex items-center gap-2 ${activeTab === 'informasi' ? 'bg-slate-900 text-white shadow-xl' : 'bg-white text-slate-400 border border-slate-100 hover:bg-slate-50'}`}><Info size={14} /> Informasi</button>
-            <button onClick={() => setActiveTab('schedules')} className={`px-6 py-3 rounded-xl font-black text-[9px] uppercase tracking-widest transition-all flex items-center gap-2 ${activeTab === 'schedules' ? 'bg-orange-600 text-white shadow-xl' : 'bg-white text-slate-400 border border-slate-100 hover:bg-slate-50'}`}><Calendar size={14} /> Schedules</button>
-            <button onClick={() => setActiveTab('articles')} className={`px-6 py-3 rounded-xl font-black text-[9px] uppercase tracking-widest transition-all flex items-center gap-2 ${activeTab === 'articles' ? 'bg-indigo-600 text-white shadow-xl' : 'bg-white text-slate-400 border border-slate-100 hover:bg-slate-50'}`}><FileText size={14} /> Artikel</button>
             <button onClick={() => setActiveTab('categories')} className={`px-6 py-3 rounded-xl font-black text-[9px] uppercase tracking-widest transition-all flex items-center gap-2 ${activeTab === 'categories' ? 'bg-emerald-600 text-white shadow-xl' : 'bg-white text-slate-400 border border-slate-100 hover:bg-slate-50'}`}><Tags size={14} /> Kategori Artikel</button>
+            <button onClick={() => setActiveTab('tags')} className={`px-6 py-3 rounded-xl font-black text-[9px] uppercase tracking-widest transition-all flex items-center gap-2 ${activeTab === 'tags' ? 'bg-blue-600 text-white shadow-xl' : 'bg-white text-slate-400 border border-slate-100 hover:bg-slate-50'}`}><Tag size={14} /> Tag Artikel</button>
           </div>
         </div>
 
@@ -233,15 +212,15 @@ const ContentManagementView: React.FC<ContentManagementViewProps> = ({ startups,
           <table className="w-full">
             <thead>
               <tr className="bg-slate-50/80 border-b border-slate-100">
-                <th className="px-8 py-6 text-left cursor-pointer group select-none" onClick={() => { setSortDir(sortKey === 'title' || sortKey === 'name' ? (sortDir === 'asc' ? 'desc' : 'asc') : 'asc'); setSortKey(activeTab === 'categories' ? 'name' : 'title'); }}>
+                <th className="px-8 py-6 text-left cursor-pointer group select-none" onClick={() => { setSortDir(sortKey === 'title' || sortKey === 'name' ? (sortDir === 'asc' ? 'desc' : 'asc') : 'asc'); setSortKey(activeTab === 'categories' || activeTab === 'tags' ? 'name' : 'title'); }}>
                   <div className="flex items-center gap-2 text-[10px] font-black text-slate-400 uppercase tracking-widest group-hover:text-slate-900 transition-colors">Descriptor <ArrowUpDown size={12} /></div>
                 </th>
-                {activeTab !== 'categories' && (
+                {(activeTab !== 'categories' && activeTab !== 'tags') && (
                   <th className="px-8 py-6 text-left cursor-pointer group select-none" onClick={() => { setSortDir(sortKey === 'author' || sortKey === 'organizer' ? (sortDir === 'asc' ? 'desc' : 'asc') : 'asc'); setSortKey(activeTab === 'schedules' ? 'organizer' : 'author'); }}>
                     <div className="flex items-center gap-2 text-[10px] font-black text-slate-400 uppercase tracking-widest group-hover:text-slate-900 transition-colors">Penulis / PIC <ArrowUpDown size={12} /></div>
                   </th>
                 )}
-                {activeTab !== 'categories' && (
+                {(activeTab !== 'categories' && activeTab !== 'tags') && (
                   <th className="px-8 py-6 text-left cursor-pointer group select-none" onClick={() => { setSortDir(sortKey === 'date' ? (sortDir === 'asc' ? 'desc' : 'asc') : 'asc'); setSortKey('date'); }}>
                     <div className="flex items-center gap-2 text-[10px] font-black text-slate-400 uppercase tracking-widest group-hover:text-slate-900 transition-colors">Timeline <ArrowUpDown size={12} /></div>
                   </th>
@@ -250,8 +229,8 @@ const ContentManagementView: React.FC<ContentManagementViewProps> = ({ startups,
               </tr>
               <tr className="bg-white border-b border-slate-100">
                 <th className="px-8 py-3"><input aria-label="Filter descriptor" placeholder="Filter..." value={columnFilters.descriptor || ''} onChange={e => setColumnFilters(f => ({ ...f, descriptor: e.target.value }))} className="w-full px-3 py-2 rounded-xl bg-slate-50 text-xs outline-none" /></th>
-                {activeTab !== 'categories' && <th className="px-8 py-3"><input aria-label="Filter penulis" placeholder="Filter..." value={columnFilters.author || ''} onChange={e => setColumnFilters(f => ({ ...f, author: e.target.value }))} className="w-full px-3 py-2 rounded-xl bg-slate-50 text-xs outline-none" /></th>}
-                {activeTab !== 'categories' && <th className="px-8 py-3"><input aria-label="Filter timeline" placeholder="Filter..." value={columnFilters.date || ''} onChange={e => setColumnFilters(f => ({ ...f, date: e.target.value }))} className="w-full px-3 py-2 rounded-xl bg-slate-50 text-xs outline-none" /></th>}
+                {(activeTab !== 'categories' && activeTab !== 'tags') && <th className="px-8 py-3"><input aria-label="Filter penulis" placeholder="Filter..." value={columnFilters.author || ''} onChange={e => setColumnFilters(f => ({ ...f, author: e.target.value }))} className="w-full px-3 py-2 rounded-xl bg-slate-50 text-xs outline-none" /></th>}
+                {(activeTab !== 'categories' && activeTab !== 'tags') && <th className="px-8 py-3"><input aria-label="Filter timeline" placeholder="Filter..." value={columnFilters.date || ''} onChange={e => setColumnFilters(f => ({ ...f, date: e.target.value }))} className="w-full px-3 py-2 rounded-xl bg-slate-50 text-xs outline-none" /></th>}
                 <th className="px-8 py-3"></th>
               </tr>
             </thead>
@@ -269,6 +248,7 @@ const ContentManagementView: React.FC<ContentManagementViewProps> = ({ startups,
                         {activeTab === 'schedules' && <Calendar size={18} className="text-indigo-500" />}
                         {activeTab === 'articles' && <FileText size={18} className="text-emerald-500" />}
                         {activeTab === 'categories' && <Tags size={18} className="text-purple-500" />}
+                        {activeTab === 'tags' && <Tags size={18} className="text-blue-500" />}
                       </div>
                       <div className="min-w-0">
                          <p className="font-black text-slate-900 text-sm truncate tracking-tight">{item.title || item.name}</p>
@@ -277,8 +257,8 @@ const ContentManagementView: React.FC<ContentManagementViewProps> = ({ startups,
                       </div>
                     </div>
                   </td>
-                  {activeTab !== 'categories' && <td className="px-8 py-6 text-[10px] font-black text-slate-500 uppercase tracking-widest">{item.author || item.organizer}</td>}
-                  {activeTab !== 'categories' && <td className="px-8 py-6 text-[10px] font-black text-slate-400 uppercase tracking-widest">{new Date(item.date).toLocaleDateString()}</td>}
+                  {(activeTab !== 'categories' && activeTab !== 'tags') && <td className="px-8 py-6 text-[10px] font-black text-slate-500 uppercase tracking-widest">{item.author || item.organizer}</td>}
+                  {(activeTab !== 'categories' && activeTab !== 'tags') && <td className="px-8 py-6 text-[10px] font-black text-slate-400 uppercase tracking-widest">{new Date(item.date).toLocaleDateString()}</td>}
                   <td className="px-8 py-6 text-right">
                     <div className="flex justify-end gap-3">
                       <button onClick={() => { setEditingItem(item); setIsModalOpen(true); }} className="p-3 text-slate-300 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-all"><Edit2 size={18} /></button>

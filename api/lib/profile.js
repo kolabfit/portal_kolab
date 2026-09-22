@@ -1,6 +1,7 @@
+import { resolveStartupMembership, logStartupPosition } from './startupPosition.js';
 import crypto from 'node:crypto';
 
-export async function saveProfile(db, role, identity, data, administrative = false) {
+export async function saveProfile(db, role, identity, data, administrative = false, actor = 'ROOT') {
   const student = role === 'STUDENT';
   const admin = role === 'ADMIN';
   const table = admin ? 'admins' : student ? 'students' : 'lecturers';
@@ -12,6 +13,21 @@ export async function saveProfile(db, role, identity, data, administrative = fal
       : { lecturerCode: 'code', lecturerJobDesks: 'job_desks' }),
     ...(administrative ? { isApproved: 'is_approved', isActive: 'is_active' } : {})
   };
+  const [[current]] = await db.execute(`SELECT * FROM ${table} WHERE ${key}=? FOR UPDATE`, [identity]);
+  if (!current) throw Object.assign(new Error('Member tidak ditemukan.'), { status: 404 });
+  if (student) {
+    if (!administrative) {
+      if (data.startupPosition !== undefined || data.startup_position !== undefined) throw Object.assign(new Error('Hanya admin yang dapat mengubah posisi startup.'), { status: 403 });
+      // Membership is admin-managed; ignore stale values from the self-profile form.
+      delete fields.studentType;
+      delete fields.startupId;
+    } else {
+      const membership = await resolveStartupMembership(db, data, current);
+      data = { ...data, ...membership };
+      fields.startupPosition = 'startup_position';
+      await logStartupPosition(db, actor, identity, current, membership);
+    }
+  }
   const updates = [], values = [];
   for (const [property, column] of Object.entries(fields)) {
     if (data[property] === undefined) continue;
@@ -22,7 +38,5 @@ export async function saveProfile(db, role, identity, data, administrative = fal
     updates.push('password=?');
     values.push(crypto.createHash('sha256').update(data.password).digest('hex'));
   }
-  const [existing] = await db.execute(`SELECT ${key} FROM ${table} WHERE ${key}=?`, [identity]);
-  if (!existing.length) throw Object.assign(new Error('Member tidak ditemukan.'), { status: 404 });
   if (updates.length) await db.execute(`UPDATE ${table} SET ${updates.join(',')} WHERE ${key}=?`, [...values, identity]);
 }

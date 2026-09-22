@@ -134,7 +134,34 @@ router.get('/events', async (req, res) => {
 router.get('/articles', async (req, res) => {
   try {
     const [rows] = await db.execute('SELECT * FROM articles');
-    res.json(rows.map(record));
+    const articles = rows.map(record);
+    
+    if (articles.length > 0) {
+      const articleIds = articles.map(a => a.id);
+      const placeholders = articleIds.map(() => '?').join(',');
+      
+      const [tagRows] = await db.execute(`SELECT m.article_id, t.id, t.name, t.slug FROM article_tag_map m JOIN article_tags t ON m.tag_id = t.id WHERE m.article_id IN (${placeholders})`, articleIds);
+      const [attRows] = await db.execute(`SELECT id, article_id, file_id, original_name, mime_type, size FROM article_attachments WHERE article_id IN (${placeholders})`, articleIds);
+      
+      const tagsByArticle = {};
+      tagRows.forEach(r => {
+        if (!tagsByArticle[r.article_id]) tagsByArticle[r.article_id] = [];
+        tagsByArticle[r.article_id].push({ id: r.id, name: r.name, slug: r.slug });
+      });
+      
+      const attsByArticle = {};
+      attRows.forEach(r => {
+        if (!attsByArticle[r.article_id]) attsByArticle[r.article_id] = [];
+        attsByArticle[r.article_id].push({ id: r.id, fileId: r.file_id, originalName: r.original_name, mimeType: r.mime_type, size: r.size, url: `/api/files/${r.file_id}` });
+      });
+      
+      articles.forEach(a => {
+        a.tagList = tagsByArticle[a.id] || [];
+        a.attachments = attsByArticle[a.id] || [];
+      });
+    }
+    
+    res.json(articles);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -143,7 +170,17 @@ router.get('/articles', async (req, res) => {
 // Article categories
 router.get('/categories', async (req, res) => {
   try {
-    const [rows] = await db.execute('SELECT id, name FROM article_categories ORDER BY name ASC');
+    const [rows] = await db.execute('SELECT * FROM article_categories ORDER BY name ASC');
+    res.json(rows.map(record));
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Article tags
+router.get('/tags', async (req, res) => {
+  try {
+    const [rows] = await db.execute('SELECT * FROM article_tags ORDER BY name ASC');
     res.json(rows.map(record));
   } catch (error) {
     res.status(500).json({ error: error.message });

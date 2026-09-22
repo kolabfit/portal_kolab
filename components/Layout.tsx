@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { 
   LayoutDashboard, UserCircle, Calendar, Flag, Info, Megaphone,
-  Settings, LogOut, Menu, Bell, Users, FolderOpen, Database, X, Clock, FileText, Radio
+  Settings, LogOut, Menu, Bell, Users, FolderOpen, Database, X, Clock, FileText, Radio, Tags
 } from 'lucide-react';
 import { AppNotification, UserRole } from '../types';
 import { api } from '../api';
@@ -32,6 +32,7 @@ const Layout: React.FC<LayoutProps> = ({ children, activeTab, setActiveTab, user
   const menuItems = [
     { id: 'dashboard', label: 'Overview', icon: LayoutDashboard },
     { id: 'profile', label: 'Account', icon: UserCircle },
+    ...(userRole === UserRole.STUDENT ? [{ id: 'student-status', label: 'Status Saya', icon: UserCircle }] : []),
     { id: 'repo', label: 'Mainframe Repo', icon: FolderOpen },
     { id: 'streaming', label: 'Streaming Hub', icon: Radio },
     { id: 'informasi', label: 'Informasi', icon: Info },
@@ -41,8 +42,18 @@ const Layout: React.FC<LayoutProps> = ({ children, activeTab, setActiveTab, user
     { id: 'announcements', label: 'Broadcast', icon: Megaphone },
   ];
 
+  if (userRole === UserRole.LECTURER) {
+    menuItems.splice(2, 0,
+      { id: 'lecturer-students', label: 'Mahasiswa', icon: Users },
+      { id: 'lecturer-supervisions', label: 'Bimbingan Saya', icon: FileText },
+      { id: 'lecturer-workloads', label: 'Workload Saya', icon: Database },
+      { id: 'lecturer-startups', label: 'Startup Ko+Lab', icon: FolderOpen }
+    );
+  }
+
   if (isAdmin && userRole === UserRole.ADMIN) {
     menuItems.push({ id: 'members', label: 'Management User', icon: Users });
+    menuItems.push({ id: 'article-taxonomy', label: 'Kategori & Tag Artikel', icon: Tags });
     menuItems.push({ id: 'settings', label: 'System', icon: Settings });
   }
 

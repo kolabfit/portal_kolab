@@ -178,11 +178,11 @@ const ProfileView: React.FC<ProfileViewProps> = ({ profile, setProfile, startups
                         </div>
                       </div>
 
-                      {profile.studentStatuses?.includes('Startup') && (
+                      {profile.studentType === 'STARTUP' && (
                         <div className="animate-in slide-in-from-top-2">
-                          <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Select Startup Team</label>
+                          <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Startup (dikelola admin)</label>
                           <div className="relative">
-                            <select value={profile.startupId} onChange={e => setProfile({...profile, startupId: e.target.value})} className="w-full px-6 py-4 bg-slate-50 border-0 rounded-2xl font-bold outline-none focus:ring-4 focus:ring-orange-100 appearance-none">
+                            <select value={profile.startupId || ''} disabled className="w-full px-6 py-4 bg-slate-50 border-0 rounded-2xl font-bold outline-none focus:ring-4 focus:ring-orange-100 appearance-none">
                               <option value="">-- Choose Startup Team --</option>
                               {startups.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                             </select>

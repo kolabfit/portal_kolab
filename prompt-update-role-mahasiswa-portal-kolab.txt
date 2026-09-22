@@ -1,0 +1,1181 @@
+Bertindaklah sebagai senior full-stack developer.
+
+Pelajari terlebih dahulu seluruh source code Portal Ko+Lab versi terbaru, khususnya implementasi role STUDENT, dashboard mahasiswa, sidebar/navigation, profile/account, serta source data yang sudah dikelola oleh role ADMIN.
+
+Fitur Admin berikut sudah tersedia dan menjadi source of truth:
+- Kelola Member
+- Kelola Startup
+- Kelola Magang
+- Kelola Workload
+
+Jangan membuat ulang database atau menduplikasi data.
+
+Tugas sekarang adalah mengembangkan role mahasiswa agar mahasiswa dapat melihat status dirinya secara lengkap sebagai Member Ko+Lab.
+
+Berdasarkan tampilan role mahasiswa saat ini, fitur existing seperti Overview, Repository, Informasi, Event, Schedule, dan Broadcast tetap dipertahankan.
+
+Tambahkan informasi berikut:
+1. Status Member Ko+Lab
+2. Startup yang diikuti
+3. Job Desk di startup
+4. Status Magang
+5. Startup tempat magang
+6. Periode magang
+7. Pembimbing Lapangan
+8. Pembimbing Akademik
+9. Workload aktif
+10. Riwayat workload
+11. Jumlah active workload
+
+Jangan merusak fitur role mahasiswa existing.
+
+
+1. SOURCE OF TRUTH
+
+Gunakan data existing:
+
+students
+→ identitas mahasiswa
+→ status member
+→ student type
+→ startup_id
+→ job desk
+
+startup_teams
+→ informasi startup
+
+internships
+→ data magang
+
+workloads
++
+workload_members
+→ data workload
+
+Jangan membuat field duplicate seperti:
+
+students.is_magang
+students.total_workload
+students.workload_list
+students.internship_startup
+
+Semua summary harus ditarik dari data master existing.
+
+
+2. TAMBAHKAN MENU "STATUS SAYA"
+
+Pada sidebar/navigation role mahasiswa, tambahkan menu:
+
+STATUS SAYA
+
+atau jika penamaan existing lebih cocok:
+
+MEMBER KOLAB
+
+Gunakan nama yang konsisten dengan bahasa UI existing.
+
+Struktur navigation kira-kira:
+
+Overview
+Account
+Status Saya
+Repository
+Streaming Hub
+Informasi
+Schedule
+Events
+Broadcast
+
+Jangan mengubah navigation lain yang sudah bekerja.
+
+
+3. HALAMAN STATUS SAYA
+
+Buat halaman baru khusus role:
+
+STUDENT
+
+Halaman ini hanya menampilkan data mahasiswa yang sedang login.
+
+Mahasiswa tidak boleh memilih NIM lain.
+
+Backend harus mengambil ID mahasiswa dari:
+
+JWT / session
+
+Contoh:
+
+req.user.id
+
+Jangan menggunakan:
+
+GET /status?nim=607...
+
+yang dapat dimanipulasi mahasiswa.
+
+
+4. SECTION STATUS MEMBER KOLAB
+
+Bagian pertama menampilkan:
+
+Status Member Ko+Lab
+
+Informasi:
+
+Nama
+NIM
+Status Member
+Status Approval
+Tipe Mahasiswa
+
+Mapping status:
+
+is_active = true
+is_approved = true
+→ AKTIF
+
+is_active = false
+→ TIDAK AKTIF
+
+is_approved = false
+→ MENUNGGU PERSETUJUAN
+
+Contoh UI:
+
+STATUS MEMBER
+
+Muhammad Faisal Rahman
+607012400003
+
+[ AKTIF ]
+
+Member Ko+Lab
+Student
+
+Gunakan badge.
+
+Jangan expose:
+
+password
+hash
+JWT
+quota internal
+secret
+
+
+5. SECTION STARTUP SAYA
+
+Jika mahasiswa tergabung pada startup:
+
+students.startup_id
+
+ambil data dari:
+
+startup_teams
+
+Tampilkan:
+
+STARTUP SAYA
+
+Nama Startup
+Logo Startup
+Job Desk
+Website / Instagram jika tersedia
+
+Contoh:
+
+KROOMBOX
+
+Job Desk
+Backend Developer
+
+Jika mahasiswa tidak tergabung:
+
+Belum tergabung dalam startup.
+
+Jangan menampilkan error.
+
+
+6. STATUS STARTUP
+
+Jika ada field:
+
+studentType
+
+tampilkan juga:
+
+STARTUP MEMBER
+NON STARTUP
+
+Contoh:
+
+Tipe Member
+STARTUP
+
+Jangan membiarkan mahasiswa mengubah startup dari halaman ini.
+
+Read-only.
+
+
+7. SECTION STATUS MAGANG
+
+Tambahkan card:
+
+STATUS MAGANG
+
+Data dari:
+
+internships
+
+Ambil internship paling relevan.
+
+Prioritas:
+
+ONGOING
+PLANNED
+COMPLETED terbaru
+CANCELLED terbaru
+
+Mapping:
+
+PLANNED
+→ AKAN MAGANG
+
+ONGOING
+→ SEDANG MAGANG
+
+COMPLETED
+→ SELESAI
+
+CANCELLED
+→ DIBATALKAN
+
+Jika tidak memiliki internship:
+
+TIDAK MAGANG
+
+
+8. DETAIL MAGANG
+
+Jika ada data magang, tampilkan:
+
+Startup Tempat Magang
+Periode
+Pembimbing Lapangan
+Pembimbing Akademik
+Status
+
+Contoh:
+
+STATUS MAGANG
+
+[ SEDANG MAGANG ]
+
+Startup
+NGOLAB
+
+Periode
+01 Sep 2026 - 31 Des 2026
+
+Pembimbing Lapangan
+Budi Santoso
+
+Pembimbing Akademik
+Muhammad Yusuf Ramadhan
+
+Jangan mengambil nama pembimbing akademik dari string manual jika relasi NIP tersedia.
+
+Gunakan:
+
+internships.academic_supervisor_nip
+→ lecturers
+
+
+9. RIWAYAT MAGANG
+
+Jika mahasiswa pernah magang lebih dari sekali, tampilkan:
+
+RIWAYAT MAGANG
+
+Contoh:
+
+2025
+Startup A
+COMPLETED
+
+2026
+NGOLAB
+ONGOING
+
+Jangan menghapus history.
+
+Tampilan history dapat berupa timeline atau list card.
+
+
+10. SECTION WORKLOAD SAYA
+
+Tambahkan:
+
+WORKLOAD SAYA
+
+Data berasal dari:
+
+workload_members
++
+workloads
+
+Filter member:
+
+member_id = current student NIM
+member_role = STUDENT
+
+
+11. ACTIVE WORKLOAD SUMMARY
+
+Tampilkan summary:
+
+Active Load
+Total History
+
+Contoh:
+
+ACTIVE WORKLOAD
+2
+
+TOTAL HISTORY
+5
+
+Hitung:
+
+Active Load
+=
+jumlah workload dengan status ACTIVE
+
+Jangan menggunakan nilai total load manual dari spreadsheet lama.
+
+
+12. WORKLOAD BERDASARKAN KATEGORI
+
+Tampilkan:
+
+PKM
+Project
+Penelitian
+Lomba
+
+Contoh:
+
+PKM          0
+Project      1
+Penelitian   1
+Lomba        0
+
+Gunakan category:
+
+PKM
+PROJECT
+RESEARCH
+COMPETITION
+
+
+13. DAFTAR WORKLOAD AKTIF
+
+Tampilkan daftar workload aktif.
+
+Contoh:
+
+Project TELIN
+PROJECT
+Backend Developer
+
+ACTIVE
+
+BIMA RHN
+PENELITIAN
+Tim App Support
+
+ACTIVE
+
+Setiap item minimal:
+
+Nama workload
+Kategori
+Job Desk
+Status
+Periode
+PIC
+
+Jika PIC tersedia:
+
+Nama PIC
+Role PIC
+
+Contoh:
+
+PIC
+Heri Nugroho
+Dosen
+
+
+14. RIWAYAT WORKLOAD
+
+Tambahkan tab atau section:
+
+RIWAYAT WORKLOAD
+
+Berisi workload:
+
+COMPLETED
+CANCELLED
+
+Contoh:
+
+BESTARI HRO
+Project
+IoT Module
+COMPLETED
+
+Pisahkan:
+
+Aktif
+Riwayat
+
+agar mudah dibaca.
+
+
+15. JANGAN TAMPILKAN LABEL WORKLOAD MENYESATKAN
+
+Jangan menampilkan mahasiswa sebagai:
+
+OVERLOAD
+BURUK
+TIDAK PRODUKTIF
+
+hanya berdasarkan jumlah workload.
+
+Jika indikator digunakan, gunakan netral:
+
+0 → Tidak Ada Workload
+1 → 1 Workload Aktif
+2 → 2 Workload Aktif
+3+ → 3+ Workload Aktif
+
+Mahasiswa hanya melihat informasi, bukan penilaian.
+
+
+16. UPDATE DASHBOARD MAHASISWA
+
+Pada halaman Overview mahasiswa yang sekarang ada pada video, tambahkan summary card.
+
+Jangan mengganti seluruh dashboard.
+
+Tambahkan section ringan seperti:
+
+STATUS MEMBER
+Aktif
+
+STARTUP
+KROOMBOX
+
+MAGANG
+Sedang Magang
+
+WORKLOAD
+2 Aktif
+
+Card tersebut dapat diklik menuju:
+
+Status Saya
+
+Contoh layout:
+
+┌─────────────────┐
+│ STATUS MEMBER   │
+│ AKTIF           │
+└─────────────────┘
+
+┌─────────────────┐
+│ STARTUP         │
+│ KROOMBOX        │
+└─────────────────┘
+
+┌─────────────────┐
+│ MAGANG          │
+│ SEDANG MAGANG   │
+└─────────────────┘
+
+┌─────────────────┐
+│ WORKLOAD        │
+│ 2 ACTIVE        │
+└─────────────────┘
+
+Pertahankan visual style dashboard existing.
+
+
+17. LAYOUT HALAMAN STATUS SAYA
+
+Gunakan struktur yang clean:
+
+STATUS SAYA
+
+[ MEMBER STATUS ]
+[ STARTUP ]
+
+[ MAGANG ]
+[ ACTIVE WORKLOAD ]
+
+WORKLOAD AKTIF
+
+RIWAYAT
+
+Contoh:
+
+STATUS SAYA
+
+---------------------------------
+
+Status Member
+AKTIF
+
+Startup
+KROOMBOX
+
+Job Desk
+Backend Developer
+
+---------------------------------
+
+MAGANG
+
+Status
+SEDANG MAGANG
+
+Tempat
+NGOLAB
+
+Periode
+Sep - Des 2026
+
+Pembimbing Akademik
+...
+
+---------------------------------
+
+WORKLOAD
+
+Active Load
+2
+
+PROJECT TELIN
+Backend Developer
+
+BIMA RHN
+Tim App Support
+
+
+18. BACKEND ENDPOINT
+
+Lebih baik buat endpoint khusus:
+
+GET /api/member/me/overview
+
+atau:
+
+GET /api/student/me/status
+
+Gunakan naming sesuai architecture existing.
+
+Endpoint harus:
+
+requireSession
+
+dan role:
+
+STUDENT
+
+
+19. RESPONSE API
+
+Contoh:
+
+{
+  "profile": {
+    "nim": "607012400003",
+    "name": "Muhammad Faisal Rahman"
+  },
+
+  "membership": {
+    "isActive": true,
+    "isApproved": true,
+    "studentType": "STARTUP",
+    "jobDesk": "Backend Developer"
+  },
+
+  "startup": {
+    "id": "startup-01",
+    "name": "KROOMBOX",
+    "logoUrl": "",
+    "website": "",
+    "instagram": ""
+  },
+
+  "internship": {
+    "current": {
+      "id": "intern-01",
+      "status": "ONGOING",
+      "startupId": "startup-02",
+      "startupName": "NGOLAB",
+      "startDate": "2026-09-01",
+      "endDate": "2026-12-31",
+      "fieldSupervisor": "Budi Santoso",
+      "academicSupervisorNip": "25980015",
+      "academicSupervisorName": "Muhammad Yusuf Ramadhan"
+    },
+    "history": []
+  },
+
+  "workload": {
+    "activeLoad": 2,
+    "totalHistory": 4,
+
+    "categoryLoad": {
+      "PKM": 0,
+      "PROJECT": 1,
+      "RESEARCH": 1,
+      "COMPETITION": 0
+    },
+
+    "active": [
+      {
+        "id": "wl-01",
+        "name": "Project TELIN",
+        "category": "PROJECT",
+        "jobDesk": "Backend Developer",
+        "status": "ACTIVE",
+        "startDate": "2026-09-01",
+        "endDate": "2026-12-31",
+        "picName": "Nama PIC",
+        "picRole": "LECTURER"
+      }
+    ],
+
+    "history": []
+  }
+}
+
+
+20. SECURITY
+
+Mahasiswa hanya boleh melihat data dirinya.
+
+Jangan menerima:
+
+nim
+studentId
+memberId
+
+dari frontend untuk menentukan siapa yang dibaca.
+
+Gunakan:
+
+req.user.id
+
+dari JWT/session.
+
+Test:
+
+Student A
+
+tidak boleh melihat:
+
+Student B
+
+dengan mengubah request.
+
+
+21. DATA YANG TIDAK BOLEH DIKIRIM
+
+Jangan response:
+
+password
+password_hash
+JWT
+database credential
+secret
+internal audit data
+
+Quota/storage internal tidak perlu ditampilkan di halaman Status Saya kecuali memang dibutuhkan oleh Repository.
+
+
+22. HINDARI N+1 QUERY
+
+Jangan:
+
+1 query student
+1 query startup
+1 query internship
+1 query lecturer
+1 query untuk setiap workload
+
+Gunakan:
+
+JOIN
+LEFT JOIN
+GROUP BY
+bulk query
+
+atau beberapa query terstruktur yang efisien.
+
+Karena endpoint hanya mengambil satu mahasiswa, beberapa query terpisah masih dapat diterima, tetapi jangan melakukan loop query per workload.
+
+
+23. EMPTY STATE
+
+Tangani kondisi normal.
+
+Tidak punya startup:
+
+Belum tergabung dalam startup.
+
+Tidak magang:
+
+Belum memiliki data magang.
+
+Tidak punya workload:
+
+Belum memiliki workload aktif.
+
+Jangan menampilkan error.
+
+
+24. LOADING STATE
+
+Saat API loading:
+
+skeleton
+spinner
+
+Gunakan style existing.
+
+Jangan tampilkan:
+
+undefined
+null
+NaN
+
+
+25. ERROR STATE
+
+Jika gagal load:
+
+Data status belum dapat dimuat.
+
+Tambahkan:
+
+Coba Lagi
+
+Jangan logout user hanya karena endpoint status gagal.
+
+
+26. TYPESCRIPT TYPES
+
+Tambahkan type yang jelas.
+
+Contoh:
+
+interface StudentMemberOverview {
+  profile: {
+    nim: string;
+    name: string;
+  };
+
+  membership: {
+    isActive: boolean;
+    isApproved: boolean;
+    studentType?: string;
+    jobDesk?: string;
+  };
+
+  startup?: {
+    id: string;
+    name: string;
+    logoUrl?: string;
+    website?: string;
+    instagram?: string;
+  };
+
+  internship?: {
+    current?: InternshipSummary;
+    history: InternshipSummary[];
+  };
+
+  workload: {
+    activeLoad: number;
+    totalHistory: number;
+
+    categoryLoad: {
+      PKM: number;
+      PROJECT: number;
+      RESEARCH: number;
+      COMPETITION: number;
+    };
+
+    active: WorkloadSummary[];
+    history: WorkloadSummary[];
+  };
+}
+
+Hindari any.
+
+
+27. FRONTEND COMPONENT
+
+Jangan membuat App.tsx semakin besar jika dapat dihindari.
+
+Buat view terpisah misalnya:
+
+views/MemberStatusView.tsx
+
+atau:
+
+views/StudentStatusView.tsx
+
+Jika diperlukan pecah menjadi component:
+
+components/student/MemberStatusCard.tsx
+components/student/StartupCard.tsx
+components/student/InternshipCard.tsx
+components/student/WorkloadCard.tsx
+
+Gunakan architecture project terbaru.
+
+
+28. JANGAN DUPLIKASI ADMIN COMPONENT SECARA MENTAH
+
+Role mahasiswa adalah:
+
+READ ONLY
+
+Jangan reuse Admin Management User secara utuh sehingga tombol:
+
+Edit
+Delete
+Import
+Export
+Bulk Action
+
+ikut muncul.
+
+Boleh reuse visual/helper/query type, tetapi jangan reuse permission admin secara salah.
+
+
+29. WORKLOAD DETAIL
+
+Jika workload diklik, buka modal/detail read-only:
+
+Nama Workload
+Kategori
+Periode
+Status
+Job Desk Saya
+PIC
+Deskripsi
+
+Tidak ada:
+
+Edit
+Delete
+Tambah Member
+
+
+30. MAGANG DETAIL
+
+Jika card Magang diklik, tampilkan detail:
+
+Startup
+Periode
+Status
+Pembimbing Lapangan
+Pembimbing Akademik
+
+Read-only.
+
+
+31. RESPONSIVE
+
+Video menunjukkan aplikasi digunakan dalam layout desktop.
+
+Pastikan fitur baru tetap responsive untuk:
+
+Desktop
+Tablet
+Mobile
+
+Pada layar kecil:
+
+- card turun ke bawah;
+- jangan memaksa 4 card satu baris;
+- table workload dapat menjadi list/card;
+- text tidak terpotong.
+
+
+32. INTEGRASI UI EXISTING
+
+Gunakan visual Portal Ko+Lab existing:
+
+- white background;
+- navy/dark text;
+- yellow accent;
+- rounded card;
+- subtle border;
+- existing icon style;
+- existing sidebar pattern.
+
+Jangan membuat halaman baru dengan style berbeda.
+
+
+33. TEST BACKEND
+
+Tambahkan test:
+
+1. Student dapat membuka overview sendiri.
+2. Student A tidak dapat membuka data Student B.
+3. Startup tampil sesuai startup_id.
+4. Student tanpa startup menghasilkan null/empty state.
+5. Internship ONGOING tampil sebagai current.
+6. Internship PLANNED tampil jika tidak ada ONGOING.
+7. Completed internship masuk history.
+8. Academic supervisor name benar.
+9. Active workload count benar.
+10. Completed workload tidak masuk activeLoad.
+11. Completed workload masuk history.
+12. Job desk workload benar.
+13. Category load benar.
+14. Password/hash tidak pernah dikirim.
+15. Lecturer tidak dapat menggunakan endpoint student self jika tidak sesuai design.
+16. Unauthenticated → 401.
+
+
+34. FRONTEND VERIFICATION
+
+Pastikan:
+
+Status Saya
+
+tampil hanya pada role:
+
+STUDENT
+
+Student dapat melihat:
+
+Status Member
+Startup
+Job Desk
+Magang
+Workload
+
+Tidak ada action Admin.
+
+
+35. UPDATE DASHBOARD
+
+Pastikan dashboard role mahasiswa menampilkan summary baru:
+
+STATUS MEMBER
+STARTUP
+MAGANG
+WORKLOAD
+
+Card harus menggunakan API overview yang sama atau data state yang sama.
+
+Jangan melakukan API request duplicate yang tidak perlu.
+
+
+36. BUILD & TEST
+
+Setelah implementasi:
+
+Frontend:
+
+npm run build
+
+Backend:
+
+npm test
+
+Jalankan semua test baru dan existing.
+
+Jika ada error:
+
+- analisis;
+- perbaiki;
+- run ulang.
+
+Jangan menyatakan fitur selesai sebelum build dan tests berhasil.
+
+
+37. JANGAN MERUSAK FITUR EXISTING
+
+Pastikan role Student tetap dapat menggunakan:
+
+Overview
+Account
+Repository
+Informasi
+Schedule
+Events
+Broadcast
+Streaming jika ada
+
+Admin:
+
+Management User
+Startup
+Magang
+Workload
+
+Lecturer:
+
+Mahasiswa
+Bimbingan Saya
+Workload Saya
+
+harus tetap berjalan.
+
+
+38. TARGET UI AKHIR
+
+Target halaman:
+
+STATUS SAYA
+
+Muhammad Faisal Rahman
+607012400003
+
+[ MEMBER AKTIF ]
+
+---------------------------------
+
+STARTUP SAYA
+
+KROOMBOX
+Backend Developer
+
+---------------------------------
+
+MAGANG
+
+[ SEDANG MAGANG ]
+
+NGOLAB
+Sep 2026 - Des 2026
+
+Pembimbing Lapangan
+...
+
+Pembimbing Akademik
+...
+
+---------------------------------
+
+WORKLOAD
+
+Active Load
+2
+
+Project TELIN
+PROJECT
+Backend Developer
+
+BIMA RHN
+PENELITIAN
+Tim App Support
+
+---------------------------------
+
+RIWAYAT
+
+
+Dashboard:
+
+OVERVIEW
+
+[ MEMBER ]
+AKTIF
+
+[ STARTUP ]
+KROOMBOX
+
+[ MAGANG ]
+SEDANG MAGANG
+
+[ WORKLOAD ]
+2 ACTIVE
+
+
+39. ACCEPTANCE CRITERIA
+
+Fitur dianggap selesai jika:
+
+✓ Student dapat melihat status member Ko+Lab
+✓ Student dapat melihat status akun/approval
+✓ Student dapat melihat startup
+✓ Student dapat melihat job desk startup
+✓ Student dapat melihat status magang
+✓ Student dapat melihat startup tempat magang
+✓ Student dapat melihat periode magang
+✓ Student dapat melihat pembimbing lapangan
+✓ Student dapat melihat pembimbing akademik
+✓ Student dapat melihat workload aktif
+✓ Student dapat melihat job desk workload
+✓ Student dapat melihat kategori workload
+✓ Student dapat melihat PIC workload
+✓ Student dapat melihat riwayat workload
+✓ Student dapat melihat active load
+✓ Dashboard mempunyai summary Member/Startup/Magang/Workload
+
+SECURITY
+✓ Student hanya dapat membaca data sendiri
+✓ NIM berasal dari JWT/session
+✓ Tidak ada password/hash di response
+✓ Semua data read-only
+
+QUALITY
+✓ Tidak ada duplikasi source of truth
+✓ Empty state bekerja
+✓ Responsive
+✓ Existing Student features tetap bekerja
+✓ Backend test berhasil
+✓ Frontend build berhasil
+
+
+40. IMPLEMENTATION REPORT
+
+Setelah selesai, berikan laporan:
+
+STUDENT MEMBER STATUS IMPLEMENTATION SUMMARY
+
+1. Existing Student UI Reviewed
+2. Student Navigation Changes
+3. Status Saya Page
+4. Membership Status
+5. Startup Integration
+6. Internship Integration
+7. Internship History
+8. Workload Integration
+9. Workload History
+10. Dashboard Summary
+11. Backend Endpoint
+12. Data Query Strategy
+13. Authorization
+14. Security
+15. Files Added
+16. Files Modified
+17. Tests Added
+18. Test Results
+19. Frontend Build Result
+20. Known Limitations
+
+Jangan hanya memberikan rekomendasi.
+
+Implementasikan fitur langsung pada source code Portal Ko+Lab, jalankan backend tests dan frontend build, perbaiki error yang ditemukan, lalu berikan implementation summary.

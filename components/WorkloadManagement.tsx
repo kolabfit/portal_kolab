@@ -31,7 +31,7 @@ export default function WorkloadManagement({ onShowAlert, showConfirm }: { onSho
 
   const load = async () => {
     try {
-      const [workloads, people, teams, memberSummary] = await Promise.all([api.getWorkloads(), api.postData('getAllMembers', {}), api.getData('getStartups'), api.getWorkloadSummary()]);
+      const [workloads, people, teams, memberSummary] = await Promise.all([api.getWorkloads(), Promise.all([api.postData('getStudents', {}), api.postData('getLecturers', {})]).then(([s, l]) => [...s, ...l]), api.getData('getStartups'), api.getWorkloadSummary()]);
       setItems(Array.isArray(workloads) ? workloads : []); setMembers(Array.isArray(people) ? people : []); setStartups(Array.isArray(teams) ? teams : []); setSummary(Array.isArray(memberSummary) ? memberSummary : []);
     } catch (error) { onShowAlert('Workload', error instanceof Error ? error.message : 'Data workload gagal dimuat.', 'error'); }
   };

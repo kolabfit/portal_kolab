@@ -11,6 +11,8 @@ CREATE TABLE IF NOT EXISTS students (
   photo_id TEXT,
   type ENUM('STARTUP', 'NON_STARTUP') DEFAULT 'NON_STARTUP',
   startup_id VARCHAR(50),
+  startup_position VARCHAR(20) NULL,
+  INDEX idx_students_startup_position (startup_id, startup_position),
   job_desk VARCHAR(100),
   is_approved BOOLEAN DEFAULT TRUE,
   is_active BOOLEAN DEFAULT TRUE,
@@ -169,6 +171,34 @@ CREATE TABLE IF NOT EXISTS articles (
 CREATE TABLE IF NOT EXISTS article_categories (
   id VARCHAR(50) PRIMARY KEY,
   name VARCHAR(100) NOT NULL
+);
+
+-- ArticleTags
+CREATE TABLE IF NOT EXISTS article_tags (
+  id VARCHAR(50) PRIMARY KEY,
+  name VARCHAR(100) NOT NULL,
+  slug VARCHAR(100) NOT NULL UNIQUE,
+  is_active BOOLEAN DEFAULT TRUE,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS article_tag_map (
+  article_id VARCHAR(50) NOT NULL,
+  tag_id VARCHAR(50) NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (article_id, tag_id)
+);
+
+CREATE TABLE IF NOT EXISTS article_attachments (
+  id VARCHAR(50) PRIMARY KEY,
+  article_id VARCHAR(50) NOT NULL,
+  file_id VARCHAR(100) NOT NULL,
+  original_name VARCHAR(255) NOT NULL,
+  mime_type VARCHAR(100),
+  size INT,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_attachments_article (article_id)
 );
 
 -- Notifications

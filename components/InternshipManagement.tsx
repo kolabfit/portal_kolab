@@ -52,7 +52,7 @@ const InternshipManagement: React.FC<Props> = ({ onShowAlert, showConfirm }) => 
   const load = async () => {
     setLoading(true);
     const [records, people, teams] = await Promise.all([
-      api.getData('getInternships'), api.postData('getAllMembers', {}), api.getData('getStartups')
+      api.getData('getInternships'), Promise.all([api.postData('getStudents', {}), api.postData('getLecturers', {})]).then(([s, l]) => [...s, ...l]), api.getData('getStartups')
     ]);
     const valid = Array.isArray(records) && Array.isArray(people) && Array.isArray(teams);
     if (valid) {

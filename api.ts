@@ -1,3 +1,4 @@
+import type { StudentMemberOverview } from './types';
 /**
  * PORTAL KOLAB API GATEWAY
  * Version: 3.0.0 - Node.js & MySQL Implementation
@@ -41,6 +42,7 @@ export const api = {
     try {
       // Mapping action to specialized endpoints if needed
       let endpoint = '';
+      if (action.startsWith('lecturer/')) endpoint = `/${action}`;
       switch (action) {
         case 'getAssets': endpoint = '/data/assets'; break;
         case 'getNotifications': endpoint = '/data/notifications'; break;
@@ -51,8 +53,14 @@ export const api = {
         case 'getEvents': endpoint = '/data/events'; break;
         case 'getArticles': endpoint = '/data/articles'; break;
         case 'getCategories': endpoint = '/data/categories'; break;
+        case 'getTags': endpoint = '/data/tags'; break;
         case 'getInternships': endpoint = '/data/internships'; break;
-        default: endpoint = `/data/${action}`;
+        case 'getLecturerOverview': endpoint = '/lecturer/overview'; break;
+        case 'getLecturerStudents': endpoint = '/lecturer/students'; break;
+        case 'getLecturerSupervisions': endpoint = '/lecturer/supervisions'; break;
+        case 'getLecturerWorkloads': endpoint = '/lecturer/workloads'; break;
+        case 'getLecturerStartups': endpoint = '/lecturer/startups'; break;
+        default: if (!endpoint) endpoint = `/data/${action}`;
       }
 
       const url = `${API_BASE_URL}${endpoint}?t=${Date.now()}`;
@@ -71,6 +79,13 @@ export const api = {
       console.error(`GET request failed for [${action}]:`, error);
       return null;
     }
+  },
+  async getStudentStatus(signal?: AbortSignal): Promise<StudentMemberOverview> {
+    const response = await fetch(API_BASE_URL + '/student/me/status', {
+      headers: { Authorization: 'Bearer ' + this.getToken() }, cache: 'no-store', signal
+    });
+    if (!response.ok) throw new Error('Data status belum dapat dimuat.');
+    return response.json();
   },
   async getWorkloads() {
     const response = await fetch(`${API_BASE_URL}/workloads?t=${Date.now()}`, { headers: this.getToken() ? { Authorization: 'Bearer ' + this.getToken() } : {} });

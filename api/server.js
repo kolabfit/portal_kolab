@@ -19,6 +19,8 @@ import photoboothRoutes from './routes/photobooth.js';
 import memberTransferRoutes from './routes/memberTransfer.js';
 import internshipTransferRoutes from './routes/internshipTransfer.js';
 import workloadRoutes from './routes/workloads.js';
+import studentStatusRoutes from './routes/studentStatus.js';
+import lecturerRoutes from './routes/lecturer.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -50,6 +52,8 @@ app.use('/api/photobooth', photoboothRoutes);
 app.use('/api/admin/members', memberTransferRoutes);
 app.use('/api/admin/internships', internshipTransferRoutes);
 app.use('/api/workloads', workloadRoutes);
+app.use('/api/student', studentStatusRoutes);
+app.use('/api/lecturer', lecturerRoutes);
 
 app.get('/', (req, res) => {
   res.send('Portal Kolab API is running');

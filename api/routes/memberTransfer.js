@@ -1,3 +1,4 @@
+import { validateStartupPosition, resolveStartupMembership, logStartupPosition } from '../lib/startupPosition.js';
 import express from 'express';
 import multer from 'multer';
 import XLSX from 'xlsx';
@@ -17,7 +18,7 @@ const upload = multer({
   }
 });
 
-const studentFields = ['nim', 'name', 'email', 'password', 'type', 'startup_id', 'job_desk', 'is_approved', 'is_active', 'custom_quota', 'custom_max_upload', 'statuses', 'youtube', 'spotify'];
+const studentFields = ['nim', 'name', 'email', 'password', 'type', 'startup_id', 'startup_position', 'job_desk', 'is_approved', 'is_active', 'custom_quota', 'custom_max_upload', 'statuses', 'youtube', 'spotify'];
 const lecturerFields = ['nip', 'name', 'email', 'password', 'job_desks', 'code', 'is_approved', 'is_active', 'custom_quota', 'custom_max_upload', 'youtube', 'spotify'];
 const aliases = {
   nim: ['nim', 'student_nim', 'student id', 'nomor induk mahasiswa'],
@@ -27,6 +28,7 @@ const aliases = {
   password: ['password', 'kata sandi'],
   type: ['type', 'student type', 'tipe', 'tipe mahasiswa', 'student_type'],
   startup_id: ['startup id', 'startup_id', 'startupid', 'id startup', 'startup', 'startup name', 'startup_name', 'nama startup', 'nama tim', 'startup team'],
+  startup_position: ['startup position', 'posisi startup', 'posisi'],
   job_desk: ['job desk', 'job_desk', 'jobdesk', 'job desk mahasiswa'],
   job_desks: ['job desks', 'job_desks', 'jobdesks', 'job desk dosen'],
   code: ['code', 'kode', 'kode dosen', 'lecturer code'],
@@ -110,8 +112,10 @@ async function buildRows(file, role) {
 async function validateRows(parsed, role, duplicateMode = 'skip') {
   const identifier = role === 'STUDENT' ? 'nim' : 'nip';
   const table = role === 'STUDENT' ? 'students' : 'lecturers';
-  const [existing] = await db.execute(`SELECT ${identifier} FROM ${table}`);
+  const [existing] = await db.execute(`SELECT ${identifier},name${role === 'STUDENT' ? ',type,startup_id,startup_position' : ''} FROM ${table}`);
   const existingIds = new Set(existing.map(row => String(row[identifier])));
+  const existingById = new Map(existing.map(row => [String(row[identifier]), row]));
+  const leadership = new Map(existing.filter(row => row.type === 'STARTUP' && row.startup_id && row.startup_position && row.startup_position !== 'MEMBER').map(row => [row.startup_id + ':' + row.startup_position, row]));
   const fileIds = new Set();
   const [startups] = role === 'STUDENT' ? await db.execute('SELECT id, name FROM startup_teams') : [[]];
   const startupByValue = new Map();
@@ -121,7 +125,8 @@ async function validateRows(parsed, role, duplicateMode = 'skip') {
   });
   const results = parsed.rows.map(row => {
     const errors = [];
-    const id = row[identifier];
+    const id = String(row[identifier] ?? '').trim();
+    row[identifier] = id;
     if (!id) errors.push(`${identifier.toUpperCase()} kosong`);
     if (id.length > 20) errors.push(`${identifier.toUpperCase()} melebihi 20 karakter`);
     if (!row.name) errors.push('Nama kosong');
@@ -131,20 +136,38 @@ async function validateRows(parsed, role, duplicateMode = 'skip') {
     if (row.is_active !== undefined && boolValue(row.is_active, true) === null) errors.push('is_active tidak valid');
     if (row.is_approved !== undefined && boolValue(row.is_approved, true) === null) errors.push('is_approved tidak valid');
     if (role === 'STUDENT') {
-      const type = String(row.type ?? '').trim().toUpperCase();
+      const current = existingById.get(String(id)) || {};
+      const type = String(row.type || current.type || 'NON_STARTUP').trim().toUpperCase();
+      row.type = type;
+      if (row.startup_id === undefined) row.startup_id = current.startup_id;
       if (type && !['STARTUP', 'NON_STARTUP'].includes(type)) errors.push('Student type tidak valid');
-      if (row.startup_id !== undefined && String(row.startup_id).trim()) {
+      if (row.startup_id != null && String(row.startup_id).trim()) {
         const startupKey = String(row.startup_id).trim().toLowerCase();
         const resolvedStartupId = startupByValue.get(startupKey);
         if (resolvedStartupId) row.startup_id = resolvedStartupId;
         else errors.push('Startup ID atau nama startup tidak ditemukan');
       }
       if (type === 'STARTUP' && !String(row.startup_id ?? '').trim()) errors.push('Startup wajib diisi untuk tipe STARTUP');
-      if (type === 'NON_STARTUP' && String(row.startup_id ?? '').trim()) errors.push('Startup hanya boleh diisi untuk tipe STARTUP');
+      if (type === 'NON_STARTUP') row.startup_id = null;
+      try {
+        const position = validateStartupPosition(row.startup_position, { normalize: true });
+        row.startup_position = type === 'STARTUP' && row.startup_id ? position || 'MEMBER' : null;
+        if (row.startup_position && row.startup_position !== 'MEMBER') {
+          const occupant = leadership.get(row.startup_id + ':' + row.startup_position);
+          if (occupant && String(occupant.nim) !== String(id)) {
+            const startup = startups.find(s => s.id === row.startup_id);
+            errors.push(`Posisi ${row.startup_position} pada startup ${startup?.name || row.startup_id} sudah diisi oleh ${occupant.name}.`);
+          }
+        }
+      } catch (error) { errors.push(error.message); }
     }
     const duplicateInFile = id && fileIds.has(id);
     if (id) fileIds.add(id);
     const duplicateInDatabase = id && existingIds.has(id);
+    if (role === 'STUDENT' && !errors.length && !duplicateInFile && (!duplicateInDatabase || duplicateMode === 'update')) {
+      for (const [key, member] of leadership) if (String(member.nim) === String(id)) leadership.delete(key);
+      if (row.startup_position && row.startup_position !== 'MEMBER') leadership.set(row.startup_id + ':' + row.startup_position, { nim: id, name: row.name });
+    }
     const status = errors.length ? 'INVALID' : duplicateInFile || duplicateInDatabase ? 'DUPLICATE' : 'VALID';
     return { ...row, status, errors, duplicateInFile, duplicateInDatabase, action: status === 'DUPLICATE' ? duplicateMode : 'insert' };
   });
@@ -206,7 +229,7 @@ router.get('/template/:role', (req, res) => {
   if (!['STUDENT', 'LECTURER'].includes(role)) return res.status(400).json({ status: 'error', message: 'Role template tidak valid.' });
   const headers = role === 'STUDENT' ? studentFields : lecturerFields;
   const example = role === 'STUDENT'
-    ? { nim: 'CONTOH001', name: 'Nama Contoh', email: 'contoh@example.com', password: '', type: 'NON_STARTUP', startup_id: '', job_desk: '', is_approved: 'TRUE', is_active: 'TRUE', custom_quota: '', custom_max_upload: '', statuses: '', youtube: '', spotify: '' }
+    ? { nim: 'CONTOH001', name: 'Nama Contoh', email: 'contoh@example.com', password: '', type: 'NON_STARTUP', startup_id: '', startup_position: '', job_desk: '', is_approved: 'TRUE', is_active: 'TRUE', custom_quota: '', custom_max_upload: '', statuses: '', youtube: '', spotify: '' }
     : { nip: 'CONTOH001', name: 'Nama Dosen Contoh', email: 'dosen@example.com', password: '', job_desks: 'Pembimbing, Koordinator', code: '', is_approved: 'TRUE', is_active: 'TRUE', custom_quota: '', custom_max_upload: '', youtube: '', spotify: '' };
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet([Object.fromEntries(headers.map(header => [header, example[header]]))]), role === 'STUDENT' ? 'Mahasiswa' : 'Dosen');
@@ -275,11 +298,7 @@ router.post('/import/commit', async (req, res) => {
           summary.failures.push({ row_number: row.rowNumber, identifier: rowIdentifier, name: rowName, error_message: 'Startup wajib diisi untuk tipe STARTUP.' });
           continue;
         }
-        if (type === 'NON_STARTUP' && startupValue) {
-          summary.failed += 1;
-          summary.failures.push({ row_number: row.rowNumber, identifier: rowIdentifier, name: rowName, error_message: 'Startup hanya boleh diisi untuk tipe STARTUP.' });
-          continue;
-        }
+
       }
       if (row.status === 'INVALID' || (row.status === 'DUPLICATE' && row.action !== 'update')) {
         summary[row.status === 'INVALID' ? 'failed' : 'skipped'] += 1;
@@ -295,8 +314,22 @@ router.post('/import/commit', async (req, res) => {
       if (values.job_desks !== undefined) values.job_desks = JSON.stringify(listValue(values.job_desks));
       ['is_active', 'is_approved'].forEach(field => { if (values[field] !== undefined) values[field] = boolValue(values[field]); });
       ['custom_quota', 'custom_max_upload'].forEach(field => { if (values[field] !== undefined) values[field] = Number(values[field]); });
+      await connection.query('SAVEPOINT import_member_row');
       try {
-        const [existing] = await connection.execute(`SELECT ${identifier} FROM ${table} WHERE ${identifier}=?`, [values[identifier]]);
+        const [existing] = await connection.execute(`SELECT * FROM ${table} WHERE ${identifier}=? FOR UPDATE`, [values[identifier]]);
+        if (existing.length && row.action !== 'update') { summary.skipped += 1; continue; }
+        let membership;
+        if (role === 'STUDENT') {
+          membership = await resolveStartupMembership(connection, {
+            studentType: values.type,
+            startupId: row.startup_id === undefined ? undefined : row.startup_id,
+            startupPosition: validateStartupPosition(row.startup_position, { normalize: true }) || 'MEMBER'
+          }, existing[0] || {});
+          values.type = membership.studentType;
+          values.startup_id = membership.startupId;
+          values.startup_position = membership.startupPosition;
+          await logStartupPosition(connection, req.user.id, values[identifier], existing[0] || {}, membership);
+        }
         if (existing.length && row.action === 'update') {
           const updates = Object.keys(values).filter(field => field !== identifier);
           if (updates.length) await connection.execute(`UPDATE ${table} SET ${updates.map(field => `${field}=?`).join(', ')} WHERE ${identifier}=?`, [...updates.map(field => values[field]), values[identifier]]);
@@ -311,12 +344,13 @@ router.post('/import/commit', async (req, res) => {
           summary.skipped += 1;
         }
       } catch (error) {
+        await connection.query('ROLLBACK TO SAVEPOINT import_member_row');
         summary.failed += 1;
         summary.failures.push({ row_number: row.rowNumber, identifier: row.identifier, name: row.name, error_message: error.message });
       }
     }
+    await connection.execute('INSERT INTO system_logs (timestamp, action, user_id, details) VALUES (NOW(), ?, ?, ?)', [`import${role === 'STUDENT' ? 'Students' : 'Lecturers'}`, req.user.id, JSON.stringify(summary)]);
     await connection.commit();
-    await db.execute('INSERT INTO system_logs (timestamp, action, user_id, details) VALUES (NOW(), ?, ?, ?)', [`import${role === 'STUDENT' ? 'Students' : 'Lecturers'}`, req.user.id, JSON.stringify(summary)]);
     res.json({ status: 'success', ...summary });
   } catch (error) {
     await connection.rollback();
@@ -335,19 +369,22 @@ router.get('/export/:role', async (req, res) => {
   const table = isStudent ? 'students' : 'lecturers';
   const identifier = isStudent ? 'nim' : 'nip';
   const query = isStudent
-    ? `SELECT s.nim,s.name,s.email,s.type,s.startup_id,s.job_desk,s.is_approved,s.is_active,s.custom_quota,s.custom_max_upload,s.statuses,s.youtube,s.spotify,s.created_at,st.name AS startup_name FROM students s LEFT JOIN startup_teams st ON st.id=s.startup_id ${search ? 'WHERE s.nim LIKE ? OR s.name LIKE ? OR s.email LIKE ?' : ''} ORDER BY s.created_at DESC`
+    ? `SELECT s.nim,s.name,s.email,s.type,s.startup_id,s.startup_position,s.job_desk,s.is_approved,s.is_active,s.custom_quota,s.custom_max_upload,s.statuses,s.youtube,s.spotify,s.created_at,st.name AS startup_name,
+      (SELECT i.status FROM internships i WHERE i.student_nim=s.nim ORDER BY CASE i.status WHEN 'ONGOING' THEN 0 WHEN 'PLANNED' THEN 1 WHEN 'COMPLETED' THEN 2 ELSE 3 END,i.start_date DESC,i.created_at DESC,i.id DESC LIMIT 1) AS internship_status,
+      (SELECT COUNT(*) FROM workload_members wm JOIN workloads w ON w.id=wm.workload_id WHERE wm.member_role='STUDENT' AND wm.member_id=s.nim AND w.status='ACTIVE') AS active_load
+      FROM students s LEFT JOIN startup_teams st ON st.id=s.startup_id ${search ? 'WHERE s.nim LIKE ? OR s.name LIKE ? OR s.email LIKE ?' : ''} ORDER BY s.created_at DESC`
     : `SELECT nip,name,email,code,job_desks,is_approved,is_active,custom_quota,custom_max_upload,youtube,spotify,created_at FROM lecturers ${search ? 'WHERE nip LIKE ? OR name LIKE ? OR email LIKE ?' : ''} ORDER BY created_at DESC`;
   const [rows] = await db.execute(query, search ? [search, search, search] : []);
   const date = new Date().toISOString().slice(0, 10);
   const label = isStudent ? 'mahasiswa' : 'dosen';
   await db.execute('INSERT INTO system_logs (timestamp, action, user_id, details) VALUES (NOW(), ?, ?, ?)', [`export${isStudent ? 'Students' : 'Lecturers'}${format === 'xlsx' ? 'Excel' : 'Pdf'}`, req.user.id, JSON.stringify({ totalRows: rows.length, search: req.query.search || '' })]);
   if (format === 'xlsx') {
-    const output = isStudent ? rows.map((row, index) => ({ No: index + 1, NIM: row.nim, Nama: row.name, Email: row.email, 'Tipe Mahasiswa': row.type, Startup: row.startup_name || '', 'Job Desk': row.job_desk, 'Status Approved': !!row.is_approved, 'Status Active': !!row.is_active, 'Storage Quota': row.custom_quota, 'Max Upload': row.custom_max_upload, 'Status Mahasiswa': row.statuses, YouTube: row.youtube, Spotify: row.spotify, 'Tanggal Terdaftar': row.created_at })) : rows.map((row, index) => ({ No: index + 1, NIP: row.nip, Nama: row.name, Email: row.email, 'Kode Dosen': row.code, 'Job Desk': row.job_desks, 'Status Approved': !!row.is_approved, 'Status Active': !!row.is_active, 'Storage Quota': row.custom_quota, 'Max Upload': row.custom_max_upload, YouTube: row.youtube, Spotify: row.spotify, 'Tanggal Terdaftar': row.created_at }));
+    const output = isStudent ? rows.map((row, index) => ({ No: index + 1, NIM: row.nim, Nama: row.name, Startup: row.startup_name || '', 'Posisi Startup': row.type === 'STARTUP' && row.startup_id ? (row.startup_position === 'MEMBER' ? 'Anggota' : row.startup_position || '-') : '-', 'Status Magang': row.internship_status || 'Tidak Magang', 'Active Workload': Number(row.active_load || 0), 'Status Member': row.is_active && row.is_approved ? 'ACTIVE' : 'INACTIVE', 'Job Desk': row.job_desk, Email: row.email, 'Tipe Mahasiswa': row.type, 'Status Approved': !!row.is_approved, 'Status Active': !!row.is_active, 'Storage Quota': row.custom_quota, 'Max Upload': row.custom_max_upload, 'Status Mahasiswa': row.statuses, YouTube: row.youtube, Spotify: row.spotify, 'Tanggal Terdaftar': row.created_at })) : rows.map((row, index) => ({ No: index + 1, NIP: row.nip, Nama: row.name, Email: row.email, 'Kode Dosen': row.code, 'Job Desk': row.job_desks, 'Status Approved': !!row.is_approved, 'Status Active': !!row.is_active, 'Storage Quota': row.custom_quota, 'Max Upload': row.custom_max_upload, YouTube: row.youtube, Spotify: row.spotify, 'Tanggal Terdaftar': row.created_at }));
     const workbook = makeWorkbook(output, isStudent ? 'Mahasiswa' : 'Dosen').workbook;
     res.attachment(`data-${label}-kolab-${date}.xlsx`).send(XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }));
   } else {
-    const output = isStudent ? rows.map(row => ({ No: rows.indexOf(row) + 1, NIM: row.nim, Nama: row.name, Tipe: row.type, Startup: row.startup_name || '', 'Job Desk': row.job_desk, Status: row.is_active && row.is_approved ? 'Aktif' : 'Nonaktif' })) : rows.map(row => ({ No: rows.indexOf(row) + 1, NIP: row.nip, Nama: row.name, 'Kode Dosen': row.code, 'Job Desk': row.job_desks, Status: row.is_active && row.is_approved ? 'Aktif' : 'Nonaktif' }));
-    pdfTable(res, isStudent ? 'Data Mahasiswa' : 'Data Dosen', Object.keys(output[0] || (isStudent ? { No: '', NIM: '', Nama: '', Tipe: '', Startup: '', 'Job Desk': '', Status: '' } : { No: '', NIP: '', Nama: '', 'Kode Dosen': '', 'Job Desk': '', Status: '' })), output, rows.length);
+    const output = isStudent ? rows.map(row => ({ No: rows.indexOf(row) + 1, NIM: row.nim, Nama: row.name, Startup: row.startup_name || '', 'Posisi Startup': row.type === 'STARTUP' && row.startup_id ? (row.startup_position === 'MEMBER' ? 'Anggota' : row.startup_position || '-') : '-', 'Status Magang': row.internship_status || 'Tidak Magang', 'Active Workload': Number(row.active_load || 0), 'Status Member': row.is_active && row.is_approved ? 'ACTIVE' : 'INACTIVE', 'Job Desk': row.job_desk, Status: row.is_active && row.is_approved ? 'Aktif' : 'Nonaktif' })) : rows.map(row => ({ No: rows.indexOf(row) + 1, NIP: row.nip, Nama: row.name, 'Kode Dosen': row.code, 'Job Desk': row.job_desks, Status: row.is_active && row.is_approved ? 'Aktif' : 'Nonaktif' }));
+    pdfTable(res, isStudent ? 'Data Mahasiswa' : 'Data Dosen', Object.keys(output[0] || (isStudent ? { No: '', NIM: '', Nama: '', Startup: '', 'Posisi Startup': '', 'Status Magang': '', 'Active Workload': '', 'Status Member': '', 'Job Desk': '', Status: '' } : { No: '', NIP: '', Nama: '', 'Kode Dosen': '', 'Job Desk': '', Status: '' })), output, rows.length);
   }
 });
 

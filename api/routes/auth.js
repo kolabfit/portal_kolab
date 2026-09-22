@@ -1,3 +1,5 @@
+import { requireSession } from '../lib/session.js';
+import { resolveStartupMembership, logStartupPosition } from '../lib/startupPosition.js';
 import express from 'express';
 import db from '../lib/db.js';
 import crypto from 'crypto';
@@ -15,6 +17,7 @@ function memberProfile(user, role) {
           photoIdCard: user.photo_id,
           studentType: user.type,
           startupId: user.startup_id,
+          startupPosition: user.type === 'STARTUP' && user.startup_id ? user.startup_position : null,
           studentJobDesk: user.job_desk,
           isApproved: !!user.is_approved,
           isActive: !!user.is_active,
@@ -76,7 +79,10 @@ function sha256(input) {
 }
 
 router.post('/login', async (req, res) => {
-  const { username, password, isAdmin, role, id } = req.body;
+  let { username, password, isAdmin, role, id } = req.body;
+  if (typeof password === 'string') password = password.trim();
+  if (typeof id === 'string') id = id.trim();
+  if (typeof username === 'string') username = username.trim();
   if (typeof password !== 'string' || (!isAdmin && !['STUDENT', 'LECTURER'].includes(role))) {
     return res.status(400).json({ status: 'error', message: 'Invalid login details.' });
   }
@@ -127,7 +133,7 @@ router.post('/login', async (req, res) => {
   }
 });
 
-router.post('/register', async (req, res) => {
+router.post('/register', (req, res, next) => req.headers.authorization ? requireSession(req, res, next) : next(), async (req, res) => {
   const { id, password, name, role, studentType, startupId, studentJobDesk, lecturerCode } = req.body;
   if (!id || !name || !['STUDENT', 'LECTURER'].includes(role)) {
     return res.status(400).json({
@@ -147,25 +153,32 @@ router.post('/register', async (req, res) => {
   const idField = isS ? 'nim' : 'nip';
   const hashed = sha256(actualPassword);
 
+  const requestedPosition = req.body.startupPosition ?? req.body.startup_position;
+  if (isS && requestedPosition != null && req.user?.role !== 'ADMIN') return res.status(403).json({ status: 'error', message: 'Hanya admin yang dapat menetapkan posisi startup.' });
+  const connection = await db.getConnection();
   try {
-    const [existing] = await db.execute(`SELECT * FROM ${table} WHERE ${idField} = ?`, [id]);
-    if (existing.length > 0) return res.status(409).json({ status: 'error', message: 'Identity Conflict.' });
-
-    if (isS) {
-      await db.execute(
-        `INSERT INTO students (nim, password, name, type, startup_id, job_desk, avatar) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        [id, hashed, name, studentType || 'NON_STARTUP', startupId || '', studentJobDesk || 'Non Jobdesk', 'https://i.pravatar.cc/150']
-      );
-    } else {
-      await db.execute(
-        `INSERT INTO lecturers (nip, password, name, code, avatar) VALUES (?, ?, ?, ?, ?)`,
-        [id, hashed, name, lecturerCode || '', 'https://i.pravatar.cc/150']
-      );
+    await connection.beginTransaction();
+    const [existing] = await connection.execute(`SELECT * FROM ${table} WHERE ${idField} = ?`, [id]);
+    if (existing.length) {
+      await connection.rollback();
+      return res.status(409).json({ status: 'error', message: 'Identity Conflict.' });
     }
+    if (isS) {
+      const membership = await resolveStartupMembership(connection, { studentType, startupId, startupPosition: requestedPosition });
+      await connection.execute(
+        'INSERT INTO students (nim,password,name,type,startup_id,startup_position,job_desk,avatar) VALUES (?,?,?,?,?,?,?,?)',
+        [id, hashed, name, membership.studentType, membership.startupId, membership.startupPosition, studentJobDesk || 'Non Jobdesk', 'https://i.pravatar.cc/150']
+      );
+      await logStartupPosition(connection, req.user?.id || id, id, {}, membership);
+    } else {
+      await connection.execute('INSERT INTO lecturers (nip,password,name,code,avatar) VALUES (?,?,?,?,?)', [id, hashed, name, lecturerCode || '', 'https://i.pravatar.cc/150']);
+    }
+    await connection.commit();
     res.json({ status: 'success' });
   } catch (error) {
-    res.status(500).json({ status: 'error', message: error.message });
-  }
+    await connection.rollback();
+    res.status(error.status || 500).json({ status: 'error', message: error.message });
+  } finally { connection.release(); }
 });
 
 export default router;

@@ -74,6 +74,28 @@ Restart backend setelah perubahan kode. Instalasi baru tetap menggunakan
 set `PUBLIC_API_URL` ke URL publik backend, misalnya `https://portal.kolab.top/api`,
 agar URL download file menggunakan host dan HTTPS yang benar.
 
+## Posisi Startup
+
+Jalankan `npm --prefix api run db:migrate` sebelum memakai backend versi ini.
+Migration menambahkan `students.startup_position` dan index gabungan dengan
+`startup_id`. Mahasiswa STARTUP dengan relasi startup valid yang belum memiliki
+posisi mendapat `MEMBER`; Job Desk tetap disimpan terpisah. Migration dapat diulang
+tanpa mengubah posisi yang telah ditetapkan admin.
+
+Admin memilih CEO, COO, CTO, CFO, CMO, atau Anggota pada form tambah/edit mahasiswa.
+Setiap C-level hanya boleh diisi satu mahasiswa per startup. Pindah startup
+mengembalikan pilihan ke Anggota; NON_STARTUP menghapus relasi dan posisi.
+Bulk Edit Detail mendukung penetapan Anggota untuk mahasiswa pada startup yang sama.
+
+Template import memuat `startup_position`; nilai kosong untuk anggota startup
+menjadi `MEMBER`, termasuk pada import update. Alias `posisi_startup`, `posisi`,
+dan `startup position` juga diterima. Preview dan commit sama-sama memvalidasi
+duplikasi C-level. Excel/PDF memuat Posisi Startup serta mempertahankan Job Desk.
+
+Pengujian: `npm --prefix api test`, `npm test`, `npx tsc --noEmit`, dan
+`npm run build`. Detail implementasi terdapat di
+[IMPLEMENTATION-STARTUP-POSITION.md](IMPLEMENTATION-STARTUP-POSITION.md).
+
 ```powershell
 npm --prefix api test
 npx tsc --noEmit

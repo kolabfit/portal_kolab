@@ -1,3 +1,4 @@
+export type StartupPosition = 'CEO' | 'COO' | 'CTO' | 'CFO' | 'CMO' | 'MEMBER';
 
 export enum UserRole {
   STUDENT = 'STUDENT',
@@ -101,7 +102,8 @@ export interface UserProfile {
   customQuota?: number;
   customMaxUpload?: number;
   studentType?: 'STARTUP' | 'NON_STARTUP';
-  startupId?: string;
+  startupId?: string | null;
+  startupPosition?: StartupPosition | null;
   studentJobDesk?: StudentJobDesk;
   studentStatuses?: string[];
   lecturerCode?: string;
@@ -110,6 +112,35 @@ export interface UserProfile {
   isActive: boolean;
   youtube?: string;
   spotify?: string;
+}
+
+export interface LecturerOverview {
+  lecturer: { nip: string; name: string; code?: string; isActive: boolean; isApproved: boolean; jobDesks: string[] };
+  summary: { totalStudents: number; totalSupervisions: number; activeSupervisions: number; workloadsAsPic: number; activeWorkloads: number };
+}
+
+export interface LecturerStudentSummary {
+  nim: string;
+  name: string;
+  startup: { id: string; name: string; logoUrl?: string; position?: string } | null;
+  internship: { status: InternshipStatus; startupName?: string; startDate?: string; endDate?: string; fieldSupervisor?: string } | null;
+  activeWorkload: number;
+  memberStatus: string;
+  type?: string;
+  jobDesk?: string;
+}
+
+export interface LecturerWorkload {
+  id: string;
+  name: string;
+  category: string;
+  description?: string;
+  start_date?: string;
+  end_date?: string;
+  status: string;
+  member_count?: number;
+  job_desk?: string;
+  pic_name?: string;
 }
 
 export interface YoutubePlaylist {
@@ -180,6 +211,8 @@ export interface NewsInfo {
 }
 
 export interface Article {
+  tagList?: { id: string; name: string; slug: string }[];
+  attachments?: { id: string; fileId: string; originalName: string; mimeType: string; size: number; url: string }[];
   id: string;
   title: string;
   content: string;
@@ -225,4 +258,25 @@ export interface AppNotification {
   title: string;
   message: string;
   timestamp: string;
+}
+
+export interface StudentInternshipSummary {
+ id: string; status: InternshipStatus; startupId: string; startupName: string | null;
+ startDate: string; endDate: string; fieldSupervisor: string | null;
+ academicSupervisorNip: string | null; academicSupervisorName: string | null;
+ academicSupervisor2Nip: string | null; academicSupervisor2Name: string | null;
+}
+export type StudentWorkloadCategory = 'PKM' | 'PROJECT' | 'RESEARCH' | 'COMPETITION';
+export interface StudentWorkloadSummary {
+ id: string; name: string; category: StudentWorkloadCategory; description: string | null;
+ status: 'PLANNED' | 'ACTIVE' | 'COMPLETED' | 'CANCELLED'; jobDesk: string | null;
+ startDate: string | null; endDate: string | null; picName: string | null; picRole: 'STUDENT' | 'LECTURER' | null;
+}
+export interface StudentMemberOverview {
+ profile: { nim: string; name: string };
+ membership: { isActive: boolean; isApproved: boolean; studentType: string | null; jobDesk: string | null };
+ startup: { position: StartupPosition | null; id: string; name: string; logoUrl: string | null; website: string | null; instagram: string | null } | null;
+ internship: { current: StudentInternshipSummary | null; history: StudentInternshipSummary[] };
+ workload: { activeLoad: number; totalHistory: number; categoryLoad: Record<StudentWorkloadCategory, number>;
+ active: StudentWorkloadSummary[]; history: StudentWorkloadSummary[]; planned: StudentWorkloadSummary[] };
 }

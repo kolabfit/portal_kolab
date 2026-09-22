@@ -8,7 +8,7 @@ const router = express.Router();
 const collections = {
   getAssets: 'assets', getStartups: 'startup_teams', getInformasi: 'information',
   getSchedules: 'schedules', getEvents: 'events', getArticles: 'articles',
-  getCategories: 'article_categories', getAnnouncements: 'announcements'
+  getCategories: 'article_categories', getTags: 'article_tags', getAnnouncements: 'announcements'
 };
 
 router.post('/pull', requireSession, async (req, res) => {
@@ -42,6 +42,7 @@ router.post('/pull', requireSession, async (req, res) => {
         if (/^(date|datetime|timestamp)/i.test(definition.Type) && value) converted = String(value).replace('T', ' ').replace(/Z$/, '').slice(0, definition.Type === 'date' ? 10 : 19);
         row[column] = converted ?? null;
       }
+      if (table === 'article_tags' && !row.slug) row.slug = String(row.name || item.id).trim().toLowerCase().replace(/[^a-z0-9]+/g, '-');
       if (item.target) { row.target_type = item.target.type; row.target_value = item.target.value || ''; }
       if (table === 'assets') {
         const [[existing]] = await connection.query('SELECT id FROM assets ORDER BY id LIMIT 1');

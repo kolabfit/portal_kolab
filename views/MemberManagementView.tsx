@@ -1,3 +1,6 @@
+import { STARTUP_POSITIONS, STARTUP_POSITION_LABELS, startupPositionLabel } from '../startupPositions';
+import StartupPositionSelect from '../components/StartupPositionSelect';
+import type { StartupPosition } from '../types';
 
 import React, { useEffect, useState } from 'react';
 import { 
@@ -25,15 +28,19 @@ type ImportStep = 'select' | 'preview' | 'result';
 type BulkAction = 'approve' | 'unapprove' | 'activate' | 'deactivate' | 'delete' | 'edit' | 'assignInternship' | 'internshipStatus' | 'completeInternship' | 'removeInternship';
 
 const MemberManagementView: React.FC<MemberManagementViewProps> = ({ userRole, startups, onRefresh, onShowAlert, showConfirm }) => {
-  const [members, setMembers] = useState<any[]>([]);
+  const [students, setStudents] = useState<any[]>([]);
+  const [lecturers, setLecturers] = useState<any[]>([]);
+  const [activeTab, setActiveTab] = useState<'STUDENT' | 'LECTURER'>('STUDENT');
   const [isLoading, setIsLoading] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
-  const [search, setSearch] = useState('');
+  const [studentSearch, setStudentSearch] = useState('');
+  const [lecturerSearch, setLecturerSearch] = useState('');
   const [activeView, setActiveView] = useState<'members' | 'startups' | 'internships' | 'workloads'>('members');
-  const [roleFilter, setRoleFilter] = useState<'ALL' | UserRole.STUDENT | UserRole.LECTURER>('ALL');
   const [internshipFilter, setInternshipFilter] = useState<'ALL' | 'NONE' | 'PLANNED' | 'ONGOING' | 'COMPLETED' | 'CANCELLED'>('ALL');
-  const [memberPage, setMemberPage] = useState(1);
-  const [memberColumnFilters, setMemberColumnFilters] = useState({ name: '', id: '', startup: '', jobDesk: '', internship: '', workload: '', status: '' });
+  const [studentPage, setStudentPage] = useState(1);
+  const [lecturerPage, setLecturerPage] = useState(1);
+  const [studentColumnFilters, setStudentColumnFilters] = useState({ name: '', id: '', startup: '', startupPosition: '', internship: '', workload: '', status: '' });
+  const [lecturerColumnFilters, setLecturerColumnFilters] = useState({ name: '', id: '', jobDesk: '', supervision: '', workload: '', status: '' });
   
   // Modal & Popup States
   const [showAddMember, setShowAddMember] = useState(false);
@@ -46,6 +53,8 @@ const MemberManagementView: React.FC<MemberManagementViewProps> = ({ userRole, s
   const [newStudentType, setNewStudentType] = useState<'STARTUP' | 'NON_STARTUP'>('NON_STARTUP');
 
   // Operation Latency States
+  const [newStartupId, setNewStartupId] = useState('');
+  const [newStartupPosition, setNewStartupPosition] = useState<StartupPosition | '' | null>(null);
   const [isProcessingStartup, setIsProcessingStartup] = useState(false);
   const [isProcessingAdd, setIsProcessingAdd] = useState(false);
   const [startupLogoPreview, setStartupLogoPreview] = useState<string | null>(null);
@@ -59,11 +68,11 @@ const MemberManagementView: React.FC<MemberManagementViewProps> = ({ userRole, s
   const [importResult, setImportResult] = useState<any | null>(null);
   const [isTransferProcessing, setIsTransferProcessing] = useState(false);
   const [selectedMemberKeys, setSelectedMemberKeys] = useState<string[]>([]);
-  const [bulkAction, setBulkAction] = useState<BulkAction>('activate');
+  const [bulkAction, setBulkAction] = useState<BulkAction | ''>('');
   const [isBulkProcessing, setIsBulkProcessing] = useState(false);
   const [showBulkEdit, setShowBulkEdit] = useState(false);
   const [bulkEditData, setBulkEditData] = useState({
-    name: '', email: '', password: '', studentType: '', startupId: '', studentJobDesk: '', lecturerCode: '', lecturerJobDesks: ''
+    name: '', email: '', password: '', studentType: '', startupId: '', startupPosition: '', studentJobDesk: '', lecturerCode: '', lecturerJobDesks: ''
   });
   const [showInternshipBulk, setShowInternshipBulk] = useState(false);
   const [internshipBulkPreview, setInternshipBulkPreview] = useState<any[] | null>(null);
@@ -132,7 +141,7 @@ const MemberManagementView: React.FC<MemberManagementViewProps> = ({ userRole, s
   const handleMemberExport = async () => {
     try {
       setIsTransferProcessing(true);
-      const blob = await api.downloadMemberFile(transferRole, transferFormat, search);
+      const blob = await api.downloadMemberFile(transferRole, transferFormat, transferRole === 'STUDENT' ? studentSearch : lecturerSearch);
       const label = transferRole === 'STUDENT' ? 'mahasiswa' : 'dosen';
       downloadBlob(blob, `data-${label}-kolab-${new Date().toISOString().slice(0, 10)}.${transferFormat}`);
       onShowAlert('Export Berhasil', `Data ${label} berhasil diunduh.`, 'success');
@@ -154,50 +163,79 @@ const MemberManagementView: React.FC<MemberManagementViewProps> = ({ userRole, s
   const fetchMembers = async () => {
     setIsLoading(true);
     try {
-      const result = await api.postData('getAllMembers', {});
-      if (Array.isArray(result)) {
-        const parsedMembers = result.map(m => ({
-          ...m,
-          isActive: m.isActive === true || String(m.isActive).toUpperCase() === 'TRUE' || m.isActive === 1 || String(m.isActive) === '1',
-          isApproved: m.isApproved === true || String(m.isApproved).toUpperCase() === 'TRUE' || m.isApproved === 1 || String(m.isApproved) === '1'
-        }));
-        setMembers(parsedMembers);
-      } else {
-        setMembers([]);
-      }
+      const [studentsRes, lecturersRes] = await Promise.all([
+        api.postData('getStudents', {}),
+        api.postData('getLecturers', {})
+      ]);
+      const parse = (arr: any[]) => Array.isArray(arr) ? arr.map(m => ({
+        ...m,
+        isActive: m.isActive === true || String(m.isActive).toUpperCase() === 'TRUE' || m.isActive === 1 || String(m.isActive) === '1',
+        isApproved: m.isApproved === true || String(m.isApproved).toUpperCase() === 'TRUE' || m.isApproved === 1 || String(m.isApproved) === '1'
+      })) : [];
+      setStudents(parse(studentsRes));
+      setLecturers(parse(lecturersRes));
     } catch (err) {
       console.error("Critical failure during member directory pull", err);
-      setMembers([]);
+      setStudents([]);
+      setLecturers([]);
     }
     setIsLoading(false);
   };
 
   useEffect(() => { fetchMembers(); }, []);
 
-  const filteredMembers = members.filter(m => {
-    const matchesSearch = m.name?.toLowerCase().includes(search.toLowerCase()) || 
-                         m.studentId?.toString().toLowerCase().includes(search.toLowerCase());
-    const matchesRole = roleFilter === 'ALL' || m.role === roleFilter;
-    const matchesInternship = roleFilter !== UserRole.STUDENT || internshipFilter === 'ALL'
-      || (internshipFilter === 'NONE' ? !m.internshipStatus : m.internshipStatus === internshipFilter);
+  const filteredStudents = students.filter(m => {
+    const matchesSearch = m.name?.toLowerCase().includes(studentSearch.toLowerCase()) || 
+                         m.studentId?.toString().toLowerCase().includes(studentSearch.toLowerCase());
+    const matchesInternship = internshipFilter === 'ALL' || (internshipFilter === 'NONE' ? !m.internshipStatus : m.internshipStatus === internshipFilter);
     const startupName = startups.find(s => s.id === m.startupId)?.name || '';
     const status = `${m.isActive ? 'active' : 'inactive'} ${m.isApproved ? 'approved' : 'unapproved'}`;
-    return matchesSearch && matchesRole && matchesInternship &&
-      m.name?.toLowerCase().includes(memberColumnFilters.name.toLowerCase()) &&
-      String(m.studentId || '').toLowerCase().includes(memberColumnFilters.id.toLowerCase()) &&
-      startupName.toLowerCase().includes(memberColumnFilters.startup.toLowerCase()) &&
-      String(m.studentJobDesk || m.lecturerCode || '').toLowerCase().includes(memberColumnFilters.jobDesk.toLowerCase()) &&
-      String(m.internshipStatus || 'Tidak Magang').toLowerCase().includes(memberColumnFilters.internship.toLowerCase()) &&
-      `${m.workload?.activeLoad || 0} ${m.workload?.totalHistory || 0}`.includes(memberColumnFilters.workload.toLowerCase()) &&
-      status.includes(memberColumnFilters.status.toLowerCase());
+    return matchesSearch && matchesInternship &&
+      m.name?.toLowerCase().includes(studentColumnFilters.name.toLowerCase()) &&
+      String(m.studentId || '').toLowerCase().includes(studentColumnFilters.id.toLowerCase()) &&
+      startupName.toLowerCase().includes(studentColumnFilters.startup.toLowerCase()) &&
+      (!studentColumnFilters.startupPosition || (m.studentType === 'STARTUP' && m.startupId && m.startupPosition === studentColumnFilters.startupPosition)) &&
+      String(m.internshipStatus || 'Tidak Magang').toLowerCase().includes(studentColumnFilters.internship.toLowerCase()) &&
+      `${m.workload?.activeLoad || 0} ${m.workload?.totalHistory || 0}`.includes(studentColumnFilters.workload.toLowerCase()) &&
+      status.includes(studentColumnFilters.status.toLowerCase());
   });
-  const memberPageSize = 10;
-  const pagedMembers = filteredMembers.slice((memberPage - 1) * memberPageSize, memberPage * memberPageSize);
-  const memberTotalPages = Math.ceil(filteredMembers.length / memberPageSize);
-  useEffect(() => { setMemberPage(1); }, [search, roleFilter, internshipFilter, memberColumnFilters]);
+
+  const filteredLecturers = lecturers.filter(m => {
+    const matchesSearch = m.name?.toLowerCase().includes(lecturerSearch.toLowerCase()) || 
+                         m.studentId?.toString().toLowerCase().includes(lecturerSearch.toLowerCase());
+    const status = `${m.isActive ? 'active' : 'inactive'} ${m.isApproved ? 'approved' : 'unapproved'}`;
+    return matchesSearch &&
+      m.name?.toLowerCase().includes(lecturerColumnFilters.name.toLowerCase()) &&
+      String(m.studentId || '').toLowerCase().includes(lecturerColumnFilters.id.toLowerCase()) &&
+      String(m.lecturerCode || '').toLowerCase().includes(lecturerColumnFilters.jobDesk.toLowerCase()) &&
+      String(m.supervisionCount || 0).includes(lecturerColumnFilters.supervision.toLowerCase()) &&
+      `${m.workload?.activeLoad || 0} ${m.workload?.totalHistory || 0}`.includes(lecturerColumnFilters.workload.toLowerCase()) &&
+      status.includes(lecturerColumnFilters.status.toLowerCase());
+  });
+
+  const pageSize = 10;
+  const pagedStudents = filteredStudents.slice((studentPage - 1) * pageSize, studentPage * pageSize);
+  const pagedLecturers = filteredLecturers.slice((lecturerPage - 1) * pageSize, lecturerPage * pageSize);
+  const studentTotalPages = Math.ceil(filteredStudents.length / pageSize);
+  const lecturerTotalPages = Math.ceil(filteredLecturers.length / pageSize);
+
+  useEffect(() => { setStudentPage(1); }, [studentSearch, internshipFilter, studentColumnFilters]);
+  useEffect(() => { setLecturerPage(1); }, [lecturerSearch, lecturerColumnFilters]);
+  const memberDirectoryView = activeTab === 'STUDENT' ? 'students' : 'lecturers';
+  const changeDirectoryTab = (tab: 'STUDENT' | 'LECTURER') => {
+    if (tab === activeTab) return;
+    setSelectedMemberKeys([]);
+    setBulkAction('');
+    setShowBulkEdit(false);
+    setShowInternshipBulk(false);
+    setInternshipBulkPreview(null);
+    setActiveTab(tab);
+  };
 
   const memberKey = (member: any) => `${member.role}:${member.studentId}`;
-  const allVisibleSelected = filteredMembers.length > 0 && filteredMembers.every(member => selectedMemberKeys.includes(memberKey(member)));
+  
+  const currentFiltered = activeTab === 'STUDENT' ? filteredStudents : filteredLecturers;
+  const allVisibleSelected = currentFiltered.length > 0 && currentFiltered.every(member => selectedMemberKeys.includes(memberKey(member)));
 
   const toggleMemberSelection = (member: any) => {
     const key = memberKey(member);
@@ -205,19 +243,19 @@ const MemberManagementView: React.FC<MemberManagementViewProps> = ({ userRole, s
   };
 
   const toggleVisibleSelection = () => {
-    const visibleKeys = filteredMembers.map(memberKey);
+    const visibleKeys = currentFiltered.map(memberKey);
     setSelectedMemberKeys(current => allVisibleSelected
       ? current.filter(key => !visibleKeys.includes(key))
       : Array.from(new Set([...current, ...visibleKeys])));
   };
 
   const openBulkEdit = () => {
-    setBulkEditData({ name: '', email: '', password: '', studentType: '', startupId: '', studentJobDesk: '', lecturerCode: '', lecturerJobDesks: '' });
+    setBulkEditData({ name: '', email: '', password: '', studentType: '', startupId: '', startupPosition: '', studentJobDesk: '', lecturerCode: '', lecturerJobDesks: '' });
     setShowBulkEdit(true);
   };
 
-  const selectedStudentMembers = () => members
-    .filter(member => selectedMemberKeys.includes(memberKey(member)) && member.role === UserRole.STUDENT);
+  const selectedStudentMembers = () => students
+    .filter(member => selectedMemberKeys.includes(memberKey(member)));
 
   const openInternshipBulk = () => {
     const students = selectedStudentMembers();
@@ -235,7 +273,7 @@ const MemberManagementView: React.FC<MemberManagementViewProps> = ({ userRole, s
       return;
     }
     setInternshipBulkPreview(selectedStudentMembers().map(member => ({
-      studentNim: member.studentId,
+      role: member.role, studentNim: member.studentId,
       studentName: member.name,
       ...internshipBulkDraft
     })));
@@ -256,7 +294,9 @@ const MemberManagementView: React.FC<MemberManagementViewProps> = ({ userRole, s
   };
 
   const handleBulkAction = async () => {
-    const selectedMembers = members
+    if (!bulkAction || isBulkProcessing) return;
+    if (memberDirectoryView !== 'students' && ['assignInternship', 'internshipStatus', 'completeInternship', 'removeInternship'].includes(bulkAction)) return;
+    const selectedMembers = (activeTab === 'STUDENT' ? students : lecturers)
       .filter(member => selectedMemberKeys.includes(memberKey(member)))
       .map(member => ({ role: member.role, id: member.studentId }));
     if (!selectedMembers.length) return;
@@ -278,7 +318,7 @@ const MemberManagementView: React.FC<MemberManagementViewProps> = ({ userRole, s
           return;
         }
         setInternshipBulkStatus(nextStatus as typeof internshipBulkStatus);
-        const rows = students.map(member => ({ studentNim: member.studentId, status: nextStatus }));
+        const rows = students.map(member => ({ role: member.role, studentNim: member.studentId, status: nextStatus }));
         showConfirm('Konfirmasi Aksi Magang', `Ubah status ${students.length} data magang?`, async () => {
           setIsBulkProcessing(true);
           const result = await api.postData('manageInternshipsBulk', { operation: 'status', internships: rows });
@@ -289,7 +329,7 @@ const MemberManagementView: React.FC<MemberManagementViewProps> = ({ userRole, s
         return;
       }
       const operation = bulkAction === 'removeInternship' ? 'delete' : 'status';
-      const rows = students.map(member => ({ studentNim: member.studentId, status: 'COMPLETED' }));
+      const rows = students.map(member => ({ role: member.role, studentNim: member.studentId, status: 'COMPLETED' }));
       showConfirm('Konfirmasi Aksi Magang', `Proses ${students.length} data magang?`, async () => {
         setIsBulkProcessing(true);
         const result = await api.postData('manageInternshipsBulk', { operation, internships: rows });
@@ -326,12 +366,12 @@ const MemberManagementView: React.FC<MemberManagementViewProps> = ({ userRole, s
 
   const submitBulkEdit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const selectedMembers = members
+    const selectedMembers = (activeTab === 'STUDENT' ? students : lecturers)
       .filter(member => selectedMemberKeys.includes(memberKey(member)))
       .map(member => ({ role: member.role, id: member.studentId }));
     const data: Record<string, string> = {};
     Object.entries(bulkEditData).forEach(([key, value]) => {
-      if (value.trim() !== '') data[key] = value.trim();
+      if (typeof value === 'string' && value.trim() !== '') data[key] = value.trim();
     });
     if (!selectedMembers.length || !Object.keys(data).length) {
       onShowAlert('Bulk Edit', 'Pilih minimal satu member dan satu field yang akan diubah.', 'error');
@@ -343,7 +383,7 @@ const MemberManagementView: React.FC<MemberManagementViewProps> = ({ userRole, s
     if (result?.status === 'success') {
       setShowBulkEdit(false);
       setSelectedMemberKeys([]);
-      setBulkEditData({ name: '', email: '', password: '', studentType: '', startupId: '', studentJobDesk: '', lecturerCode: '', lecturerJobDesks: '' });
+      setBulkEditData({ name: '', email: '', password: '', studentType: '', startupId: '', startupPosition: '', studentJobDesk: '', lecturerCode: '', lecturerJobDesks: '' });
       onShowAlert('Bulk Edit Berhasil', `${result.affected || 0} member berhasil diperbarui.`, 'success');
       await fetchMembers();
     } else {
@@ -362,7 +402,8 @@ const MemberManagementView: React.FC<MemberManagementViewProps> = ({ userRole, s
       password: fd.get('password'),
       lecturerCode: fd.get('lecturerCode'),
       studentType: newUserRole === UserRole.STUDENT ? newStudentType : undefined,
-      startupId: newUserRole === UserRole.STUDENT && newStudentType === 'STARTUP' ? fd.get('startupId') : '',
+      startupId: newUserRole === UserRole.STUDENT && newStudentType === 'STARTUP' ? newStartupId : null,
+      ...(newUserRole === UserRole.STUDENT ? { startupPosition: newStudentType === 'STARTUP' ? newStartupPosition : null } : {}),
       studentJobDesk: newUserRole === UserRole.STUDENT ? fd.get('studentJobDesk') : ''
     };
 
@@ -429,7 +470,8 @@ const MemberManagementView: React.FC<MemberManagementViewProps> = ({ userRole, s
 
     if (isS) {
       data.studentType = fd.get('studentType');
-      data.startupId = fd.get('startupId');
+      data.startupId = editingIdentity.studentType === 'STARTUP' ? editingIdentity.startupId : null;
+      data.startupPosition = editingIdentity.studentType === 'STARTUP' ? editingIdentity.startupPosition : null;
       data.studentJobDesk = fd.get('studentJobDesk');
     } else {
       data.lecturerCode = fd.get('lecturerCode');
@@ -471,21 +513,8 @@ const MemberManagementView: React.FC<MemberManagementViewProps> = ({ userRole, s
             <RefreshCw size={20} className={isSyncing ? 'animate-spin text-orange-600' : 'group-hover:rotate-180 transition-transform duration-500'} />
           </button>
           <div className="flex gap-3">
-            {activeView === 'members' && (
-              <div className="relative group">
-                <Filter className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-300" size={18} />
-                <select 
-                  value={roleFilter} 
-                  onChange={e => setRoleFilter(e.target.value as any)}
-                  className="pl-14 pr-8 py-4 bg-white border border-slate-100 rounded-2xl shadow-sm outline-none font-bold text-xs appearance-none cursor-pointer focus:ring-4 focus:ring-orange-100 transition-all min-w-[140px]"
-                >
-                  <option value="ALL">All Roles</option>
-                  <option value={UserRole.STUDENT}>Student</option>
-                  <option value={UserRole.LECTURER}>Lecturer</option>
-                </select>
-              </div>
-            )}
-            {activeView === 'members' && roleFilter !== UserRole.LECTURER && (
+            
+            {activeView === 'members' && activeTab === 'STUDENT' && (
               <select value={internshipFilter} onChange={e => setInternshipFilter(e.target.value as typeof internshipFilter)} className="px-5 py-4 bg-white border border-slate-100 rounded-2xl shadow-sm outline-none font-bold text-xs focus:ring-4 focus:ring-orange-100">
                 <option value="ALL">Semua Status Magang</option>
                 <option value="NONE">Tidak Magang</option>
@@ -521,6 +550,7 @@ const MemberManagementView: React.FC<MemberManagementViewProps> = ({ userRole, s
                         <option value="">Pertahankan startup masing-masing</option>
                         {startups.map(startup => <option key={startup.id} value={startup.id}>{startup.name} ({startup.id})</option>)}
                       </select>
+                      {activeTab === 'STUDENT' && <select aria-label="Tetapkan Posisi Startup" value={bulkEditData.startupPosition} onChange={e => setBulkEditData({ ...bulkEditData, startupPosition: e.target.value })} className="px-5 py-4 bg-slate-50 rounded-2xl font-bold"><option value="">Pertahankan posisi</option><option value="MEMBER">Tetapkan Posisi Startup: Anggota</option></select>}
                       <input value={bulkEditData.studentJobDesk} onChange={e => setBulkEditData({ ...bulkEditData, studentJobDesk: e.target.value })} placeholder="Job desk mahasiswa" className="px-5 py-4 bg-slate-50 rounded-2xl font-bold outline-none" />
                       <input value={bulkEditData.lecturerJobDesks} onChange={e => setBulkEditData({ ...bulkEditData, lecturerJobDesks: e.target.value })} placeholder="Job desk dosen, pisahkan koma" className="px-5 py-4 bg-slate-50 rounded-2xl font-bold outline-none" />
                     </div>
@@ -544,8 +574,8 @@ const MemberManagementView: React.FC<MemberManagementViewProps> = ({ userRole, s
                     <form onSubmit={prepareInternshipBulkPreview} className="space-y-6">
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <select required value={internshipBulkDraft.startupId} onChange={e => setInternshipBulkDraft({ ...internshipBulkDraft, startupId: e.target.value })} className="px-5 py-4 bg-slate-50 rounded-2xl font-bold outline-none"><option value="">Startup tempat magang *</option>{startups.map(startup => <option key={startup.id} value={startup.id}>{startup.name}</option>)}</select>
-                        <select value={internshipBulkDraft.academicSupervisorNip} onChange={e => setInternshipBulkDraft({ ...internshipBulkDraft, academicSupervisorNip: e.target.value })} className="px-5 py-4 bg-slate-50 rounded-2xl font-bold outline-none"><option value="">Pembimbing akademik 1</option>{members.filter(member => member.role === UserRole.LECTURER).map(lecturer => <option key={lecturer.studentId} value={lecturer.studentId}>{lecturer.name} — {lecturer.studentId}</option>)}</select>
-                        <select value={internshipBulkDraft.academicSupervisor2Nip} onChange={e => setInternshipBulkDraft({ ...internshipBulkDraft, academicSupervisor2Nip: e.target.value })} className="px-5 py-4 bg-slate-50 rounded-2xl font-bold outline-none"><option value="">Pembimbing akademik 2 (opsional)</option>{members.filter(member => member.role === UserRole.LECTURER).map(lecturer => <option key={lecturer.studentId} value={lecturer.studentId}>{lecturer.name} — {lecturer.studentId}</option>)}</select>
+                        <select value={internshipBulkDraft.academicSupervisorNip} onChange={e => setInternshipBulkDraft({ ...internshipBulkDraft, academicSupervisorNip: e.target.value })} className="px-5 py-4 bg-slate-50 rounded-2xl font-bold outline-none"><option value="">Pembimbing akademik 1</option>{lecturers.map(lecturer => <option key={lecturer.studentId} value={lecturer.studentId}>{lecturer.name} — {lecturer.studentId}</option>)}</select>
+                        <select value={internshipBulkDraft.academicSupervisor2Nip} onChange={e => setInternshipBulkDraft({ ...internshipBulkDraft, academicSupervisor2Nip: e.target.value })} className="px-5 py-4 bg-slate-50 rounded-2xl font-bold outline-none"><option value="">Pembimbing akademik 2 (opsional)</option>{lecturers.map(lecturer => <option key={lecturer.studentId} value={lecturer.studentId}>{lecturer.name} — {lecturer.studentId}</option>)}</select>
                         <input required type="date" value={internshipBulkDraft.startDate} onChange={e => setInternshipBulkDraft({ ...internshipBulkDraft, startDate: e.target.value })} className="px-5 py-4 bg-slate-50 rounded-2xl font-bold outline-none" />
                         <input required type="date" value={internshipBulkDraft.endDate} min={internshipBulkDraft.startDate} onChange={e => setInternshipBulkDraft({ ...internshipBulkDraft, endDate: e.target.value })} className="px-5 py-4 bg-slate-50 rounded-2xl font-bold outline-none" />
                         <input value={internshipBulkDraft.fieldSupervisor} onChange={e => setInternshipBulkDraft({ ...internshipBulkDraft, fieldSupervisor: e.target.value })} placeholder="Pembimbing lapangan" className="px-5 py-4 bg-slate-50 rounded-2xl font-bold outline-none" />
@@ -565,12 +595,12 @@ const MemberManagementView: React.FC<MemberManagementViewProps> = ({ userRole, s
             )}
             <div className="relative w-full md:w-64 group">
               <Search className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-300" size={18} />
-              <input type="text" placeholder="Identity Query..." value={search} onChange={e => setSearch(e.target.value)} className="w-full pl-14 pr-6 py-4 bg-white border border-slate-100 rounded-2xl shadow-sm outline-none font-bold focus:ring-4 focus:ring-orange-100 transition-all" />
+              <input type="text" placeholder="Cari nama / NIM/NIP..." value={activeTab === 'STUDENT' ? studentSearch : lecturerSearch} onChange={e => activeTab === 'STUDENT' ? setStudentSearch(e.target.value) : setLecturerSearch(e.target.value)} className="w-full pl-14 pr-6 py-4 bg-white border border-slate-100 rounded-2xl shadow-sm outline-none font-bold focus:ring-4 focus:ring-orange-100 transition-all" />
             </div>
           </div>
 
           {activeView === 'members' ? (
-            <button onClick={() => { setNewStudentType('NON_STARTUP'); setShowAddMember(true); }} className="px-6 py-4 bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest flex items-center gap-2 shadow-xl hover:bg-black transition-all active:scale-95"><UserPlus size={18}/> New User</button>
+            <button onClick={() => { setNewStudentType('NON_STARTUP'); setNewStartupId(''); setNewStartupPosition(null); setShowAddMember(true); }} className="px-6 py-4 bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest flex items-center gap-2 shadow-xl hover:bg-black transition-all active:scale-95"><UserPlus size={18}/> New User</button>
           ) : (
             <button onClick={() => { setStartupLogoPreview(null); setShowStartupModal({ isOpen: true, mode: 'add' }); }} className="px-6 py-4 bg-orange-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest flex items-center gap-2 shadow-xl hover:bg-orange-700 transition-all active:scale-95"><Rocket size={18}/> New Startup</button>
           )}
@@ -581,52 +611,70 @@ const MemberManagementView: React.FC<MemberManagementViewProps> = ({ userRole, s
         {activeView === 'members' ? (
           <>
           <div className="px-10 pt-8 flex flex-wrap gap-3 items-center">
-            <button onClick={() => { setTransferMode('import'); setTransferRole(roleFilter === UserRole.LECTURER ? 'LECTURER' : 'STUDENT'); }} className="px-5 py-3 bg-orange-50 text-orange-700 rounded-2xl font-black text-[10px] uppercase tracking-widest flex items-center gap-2 hover:bg-orange-100"><Upload size={16} /> Import Data</button>
-            <button onClick={() => { setTransferMode('export'); setTransferRole(roleFilter === UserRole.LECTURER ? 'LECTURER' : 'STUDENT'); setTransferFormat('xlsx'); }} className="px-5 py-3 bg-emerald-50 text-emerald-700 rounded-2xl font-black text-[10px] uppercase tracking-widest flex items-center gap-2 hover:bg-emerald-100"><Download size={16} /> Export Data</button>
-            <select value={bulkAction} onChange={e => setBulkAction(e.target.value as BulkAction)} disabled={!selectedMemberKeys.length || isBulkProcessing} className="px-4 py-3 bg-slate-50 border border-slate-100 rounded-2xl font-black text-[10px] uppercase tracking-widest outline-none disabled:opacity-50">
+            <button onClick={() => { setTransferMode('import'); setTransferRole(activeTab); }} className="px-5 py-3 bg-orange-50 text-orange-700 rounded-2xl font-black text-[10px] uppercase tracking-widest flex items-center gap-2 hover:bg-orange-100"><Upload size={16} /> Import Data</button>
+            <button onClick={() => { setTransferMode('export'); setTransferRole(activeTab); setTransferFormat('xlsx'); }} className="px-5 py-3 bg-emerald-50 text-emerald-700 rounded-2xl font-black text-[10px] uppercase tracking-widest flex items-center gap-2 hover:bg-emerald-100"><Download size={16} /> Export Data</button>
+            <select aria-label="Pilih aksi bulk" value={bulkAction} onChange={e => setBulkAction(e.target.value as BulkAction | '')} disabled={!selectedMemberKeys.length || isBulkProcessing} className="px-4 py-3 bg-slate-50 border border-slate-100 rounded-2xl font-black text-[10px] uppercase tracking-widest outline-none disabled:opacity-50">
+              <option value="" disabled>PILIH AKSI...</option>
               <option value="activate">Aktifkan</option>
               <option value="deactivate">Nonaktifkan</option>
               <option value="approve">Setujui</option>
               <option value="unapprove">Batalkan Persetujuan</option>
-              <option value="delete">Hapus</option>
               <option value="edit">Edit Detail</option>
+              {memberDirectoryView === 'students' && <>
               <option value="assignInternship">Tetapkan Magang</option>
               <option value="internshipStatus">Ubah Status Magang</option>
               <option value="completeInternship">Selesaikan Magang</option>
               <option value="removeInternship">Hapus dari Magang</option>
+              </>}
+              <option value="delete">Hapus</option>
             </select>
-            <button onClick={handleBulkAction} disabled={!selectedMemberKeys.length || isBulkProcessing} className="px-5 py-3 bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest flex items-center gap-2 disabled:opacity-50"><ListChecks size={16} /> {isBulkProcessing ? 'Processing...' : `Bulk Action (${selectedMemberKeys.length})`}</button>
+            <button onClick={handleBulkAction} disabled={!bulkAction || !selectedMemberKeys.length || isBulkProcessing} className="px-5 py-3 bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest flex items-center gap-2 disabled:opacity-50"><ListChecks size={16} /> {isBulkProcessing ? 'Processing...' : `Bulk Action (${selectedMemberKeys.length})`}</button>
             <button type="button" onClick={openBulkEdit} disabled={!selectedMemberKeys.length || isBulkProcessing} className="px-5 py-3 bg-indigo-50 text-indigo-700 rounded-2xl font-black text-[10px] uppercase tracking-widest flex items-center gap-2 disabled:opacity-50"><Edit3 size={16} /> Edit Detail Terpilih</button>
           </div>
+          
+          <div className="px-10 pt-4 flex gap-2 border-b border-slate-100 mb-4">
+             <button onClick={() => changeDirectoryTab('STUDENT')} className={`px-6 py-3 rounded-t-2xl font-black text-xs transition-all ${activeTab === 'STUDENT' ? 'bg-slate-900 text-white' : 'bg-slate-50 text-slate-400 hover:bg-slate-100'}`}>MAHASISWA {students.length}</button>
+             <button onClick={() => changeDirectoryTab('LECTURER')} className={`px-6 py-3 rounded-t-2xl font-black text-xs transition-all ${activeTab === 'LECTURER' ? 'bg-slate-900 text-white' : 'bg-slate-50 text-slate-400 hover:bg-slate-100'}`}>DOSEN {lecturers.length}</button>
+          </div>
+          {activeTab === 'STUDENT' && <button type="button" onClick={() => { setStudentColumnFilters({ name: '', id: '', startup: '', startupPosition: '', internship: '', workload: '', status: '' }); setStudentSearch(''); setInternshipFilter('ALL'); }} className="mx-6 my-3 text-xs font-bold text-slate-500">Reset filter mahasiswa</button>}
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead>
                 <tr className="bg-slate-50 border-b border-slate-100">
-                  <th className="px-6 py-6 text-left"><input type="checkbox" checked={allVisibleSelected} onChange={toggleVisibleSelection} aria-label="Pilih semua member yang terlihat" className="h-4 w-4 accent-orange-600" /></th>
+                  <th className="px-6 py-6 text-left"><input type="checkbox" checked={allVisibleSelected} onChange={toggleVisibleSelection} aria-label="Pilih semua" className="h-4 w-4 accent-orange-600" /></th>
                   <th className="px-10 py-6 text-left text-[10px] font-black text-slate-400 uppercase tracking-widest">Name</th>
-                  <th className="px-10 py-6 text-left text-[10px] font-black text-slate-400 uppercase tracking-widest">NIM / NIP</th>
-                  <th className="px-10 py-6 text-left text-[10px] font-black text-slate-400 uppercase tracking-widest">Startup</th>
-                  <th className="px-10 py-6 text-left text-[10px] font-black text-slate-400 uppercase tracking-widest">JobDesk</th>
-                  <th className="px-10 py-6 text-left text-[10px] font-black text-slate-400 uppercase tracking-widest">Magang</th>
+                  <th className="px-10 py-6 text-left text-[10px] font-black text-slate-400 uppercase tracking-widest">{activeTab === 'STUDENT' ? 'NIM' : 'NIP'}</th>
+                  {activeTab === 'LECTURER' && <th className="px-10 py-6 text-left text-[10px] font-black text-slate-400 uppercase tracking-widest">KODE DOSEN</th>}
+                  {activeTab === 'STUDENT' && <th className="px-10 py-6 text-left text-[10px] font-black text-slate-400 uppercase tracking-widest">Startup</th>}
+                  <th className="px-10 py-6 text-left text-[10px] font-black text-slate-400 uppercase tracking-widest">{activeTab === 'STUDENT' ? 'POSISI STARTUP' : 'Job Desk'}</th>
+                  {activeTab === 'STUDENT' && <th className="px-10 py-6 text-left text-[10px] font-black text-slate-400 uppercase tracking-widest">Magang</th>}
+                  {activeTab === 'LECTURER' && <th className="px-10 py-6 text-left text-[10px] font-black text-slate-400 uppercase tracking-widest">Bimbingan</th>}
                   <th className="px-10 py-6 text-left text-[10px] font-black text-slate-400 uppercase tracking-widest">Workload</th>
                   <th className="px-10 py-6 text-left text-[10px] font-black text-slate-400 uppercase tracking-widest">Status</th>
                   <th className="px-10 py-6 text-right text-[10px] font-black text-slate-400 uppercase tracking-widest">Operations</th>
                 </tr>
                 <tr className="bg-white border-b border-slate-100">
                   <th className="px-6 py-3"></th>
-                  {[
-                    ['name', 'Filter nama'], ['id', 'Filter NIM/NIP'], ['startup', 'Filter startup'],
-                    ['jobDesk', 'Filter job desk'], ['internship', 'Filter magang'], ['workload', 'Filter workload'], ['status', 'Filter status']
-                  ].map(([key, placeholder]) => <th key={key} className="px-10 py-3"><input aria-label={placeholder} placeholder="Filter..." value={memberColumnFilters[key as keyof typeof memberColumnFilters]} onChange={e => setMemberColumnFilters(filters => ({ ...filters, [key]: e.target.value }))} className="w-full min-w-[90px] px-3 py-2 rounded-xl bg-slate-50 text-xs font-bold outline-none" /></th>)}
+                  {activeTab === 'STUDENT' ? (
+                    <>
+                      {[['name', 'Filter nama'], ['id', 'Filter NIM'], ['startup', 'Filter startup'], ['startupPosition', 'Posisi Startup'], ['internship', 'Filter magang'], ['workload', 'Filter workload'], ['status', 'Filter status']].map(([key, placeholder]) => <th key={key} className="px-10 py-3">{key === 'startupPosition' ? <select aria-label="Posisi Startup" value={studentColumnFilters.startupPosition} onChange={e => setStudentColumnFilters(filters => ({ ...filters, startupPosition: e.target.value }))} className="px-3 py-2 rounded-xl bg-slate-50 text-xs font-bold"><option value="">Semua Posisi</option>{STARTUP_POSITIONS.map(p => <option key={p} value={p}>{STARTUP_POSITION_LABELS[p]}</option>)}</select> : <input aria-label={placeholder} placeholder="Filter..." value={(studentColumnFilters as any)[key]} onChange={e => setStudentColumnFilters(filters => ({ ...filters, [key]: e.target.value }))} className="w-full min-w-[90px] px-3 py-2 rounded-xl bg-slate-50 text-xs font-bold outline-none" />}</th>)}
+                    </>
+                  ) : (
+                    <>
+                      {[['name', 'Filter nama'], ['id', 'Filter NIP'], ['jobDesk', 'Filter kode/job'], ['supervision', 'Filter bimbingan'], ['workload', 'Filter workload'], ['status', 'Filter status']].map(([key, placeholder]) => <th key={key} className="px-10 py-3"><input placeholder="Filter..." value={(lecturerColumnFilters as any)[key]} onChange={e => setLecturerColumnFilters(filters => ({ ...filters, [key]: e.target.value }))} className="w-full min-w-[90px] px-3 py-2 rounded-xl bg-slate-50 text-xs font-bold outline-none" /></th>)}
+                    </>
+                  )}
                   <th className="px-10 py-3"></th>
                 </tr>
               </thead>
+
+              
               <tbody className="divide-y divide-slate-100">
                 {isLoading ? (
-                  <tr><td colSpan={9} className="py-32 text-center text-[10px] font-black uppercase text-slate-300 animate-pulse tracking-[0.3em]">Accessing Identity Mainframe...</td></tr>
-                ) : filteredMembers.length === 0 ? (
-                  <tr><td colSpan={9} className="py-32 text-center text-[10px] font-black uppercase text-slate-300 tracking-[0.3em]">No users found in this sector</td></tr>
-                ) : pagedMembers.map(m => {
+                  <tr><td colSpan={10} className="py-32 text-center text-[10px] font-black uppercase text-slate-300 animate-pulse tracking-[0.3em]">Accessing Identity Mainframe...</td></tr>
+                ) : currentFiltered.length === 0 ? (
+                  <tr><td colSpan={10} className="py-32 text-center text-[10px] font-black uppercase text-slate-300 tracking-[0.3em]">Belum ada data {activeTab === 'STUDENT' ? 'mahasiswa' : 'dosen'}.</td></tr>
+                ) : (activeTab === 'STUDENT' ? pagedStudents : pagedLecturers).map(m => {
                   const isAccountActive = m.isActive && m.isApproved;
                   const startupName = startups.find(s => s.id === m.startupId)?.name || 'Global Registry';
                   return (
@@ -642,55 +690,43 @@ const MemberManagementView: React.FC<MemberManagementViewProps> = ({ userRole, s
                         </div>
                       </td>
                       <td className="px-10 py-6 text-[11px] font-black text-slate-400 uppercase tracking-widest font-mono">{m.studentId}</td>
-                      <td className="px-10 py-6">
-                         {m.role === UserRole.STUDENT ? (
-                           <span className={`text-[10px] font-black uppercase tracking-tight ${m.studentType === 'STARTUP' ? 'text-indigo-600' : 'text-slate-300'}`}>
-                             {m.studentType === 'STARTUP' ? startupName : 'NON-STARTUP'}
-                           </span>
-                         ) : <span className="text-slate-200">---</span>}
-                      </td>
+                      {activeTab === 'LECTURER' && <td className="px-10 py-6 text-[11px] font-black text-slate-400 uppercase tracking-widest">{m.lecturerCode || '-'}</td>}
+                      {activeTab === 'STUDENT' && <td className="px-10 py-6">
+                         <span className={`text-[10px] font-black uppercase tracking-tight ${m.studentType === 'STARTUP' ? 'text-indigo-600' : 'text-slate-300'}`}>
+                           {m.studentType === 'STARTUP' ? startupName : 'NON-STARTUP'}
+                         </span>
+                      </td>}
+                      <td className="px-10 py-6 text-[11px] font-bold text-slate-500">{activeTab === 'STUDENT' ? (<span className="px-2 py-1 rounded-lg bg-slate-100 text-slate-700 text-[10px] font-black uppercase">{startupPositionLabel(m.studentType === 'STARTUP' && m.startupId ? m.startupPosition : null)}</span>) : (Array.isArray(m.lecturerJobDesks) ? m.lecturerJobDesks.join(', ') : '-')}</td>
+                      {activeTab === 'STUDENT' && <td className="px-10 py-6">
+                        <span className={`px-3 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-widest inline-flex border ${m.internshipStatus === 'ONGOING' ? 'bg-orange-50 text-orange-600 border-orange-100' : m.internshipStatus === 'COMPLETED' ? 'bg-emerald-50 text-emerald-600 border-emerald-100' : m.internshipStatus === 'PLANNED' ? 'bg-indigo-50 text-indigo-600 border-indigo-100' : 'bg-slate-50 text-slate-400 border-slate-100'}`}>
+                          {m.internshipStatus || 'Tidak Magang'}
+                        </span>
+                      </td>}
+                      {activeTab === 'LECTURER' && <td className="px-10 py-6">
+                        <span className="px-3 py-1.5 rounded-xl text-[11px] font-black bg-indigo-50 text-indigo-600 border border-indigo-100">{m.supervisionCount || 0} Mahasiswa</span>
+                      </td>}
                       <td className="px-10 py-6"><span className={`px-3 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-widest inline-flex border ${Number(m.workload?.activeLoad || 0) >= 3 ? 'bg-red-50 text-red-600 border-red-100' : Number(m.workload?.activeLoad || 0) === 2 ? 'bg-amber-50 text-amber-600 border-amber-100' : Number(m.workload?.activeLoad || 0) === 1 ? 'bg-emerald-50 text-emerald-600 border-emerald-100' : 'bg-slate-50 text-slate-400 border-slate-100'}`}>{m.workload?.activeLoad || 0} · {Number(m.workload?.activeLoad || 0) >= 3 ? 'TINGGI' : Number(m.workload?.activeLoad || 0) === 2 ? 'SEDANG' : Number(m.workload?.activeLoad || 0) === 1 ? 'RINGAN' : 'KOSONG'}</span></td>
                       <td className="px-10 py-6">
-                         <span className="text-[10px] font-black text-slate-500 uppercase tracking-tight">{m.studentJobDesk || m.lecturerCode || 'Standard'}</span>
+                         <span className={`flex items-center gap-2 text-[10px] font-black uppercase tracking-widest ${isAccountActive ? 'text-emerald-600' : 'text-slate-400'}`}>
+                            {isAccountActive ? <CheckCircle2 size={14}/> : <Lock size={14}/>}
+                            {m.isActive ? 'Active' : 'Inactive'} · {m.isApproved ? 'Approved' : 'Pending'}
+                         </span>
                       </td>
                       <td className="px-10 py-6">
-                        {m.role === UserRole.STUDENT ? (
-                          <span className={`px-3 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-widest inline-flex border ${
-                            m.internshipStatus === 'ONGOING' ? 'bg-orange-50 text-orange-600 border-orange-100' :
-                            m.internshipStatus === 'PLANNED' ? 'bg-slate-50 text-slate-600 border-slate-200' :
-                            m.internshipStatus === 'COMPLETED' ? 'bg-emerald-50 text-emerald-600 border-emerald-100' :
-                            m.internshipStatus === 'CANCELLED' ? 'bg-red-50 text-red-600 border-red-100' : 'bg-slate-50 text-slate-400 border-slate-100'
-                          }`}>
-                            {m.internshipStatus === 'ONGOING' ? 'Sedang Magang' : m.internshipStatus === 'PLANNED' ? 'Akan Magang' : m.internshipStatus === 'COMPLETED' ? 'Selesai' : m.internshipStatus === 'CANCELLED' ? 'Dibatalkan' : 'Tidak Magang'}
-                          </span>
-                        ) : <span className="text-slate-200">---</span>}
-                      </td>
-                      <td className="px-10 py-6">
-                        <div className={`px-4 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-widest inline-flex items-center gap-1.5 border ${isAccountActive ? 'bg-emerald-50 text-emerald-600 border-emerald-100/50' : 'bg-red-50 text-red-600 border-red-100/50'}`}>
-                          {isAccountActive ? <Unlock size={12} /> : <Lock size={12} />}
-                          {isAccountActive ? 'Active' : 'Locked'}
+                        <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <button aria-label={`Edit ${m.name}`} onClick={() => { setEditingIdentity(m); }} className="p-2.5 bg-slate-100 hover:bg-slate-900 hover:text-white rounded-xl transition-colors text-slate-400"><Edit3 size={16} /></button>
+                          {userRole === UserRole.ADMIN && <button onClick={() => { setEditingQuota(m); }} className="p-2.5 bg-slate-100 hover:bg-indigo-600 hover:text-white rounded-xl transition-colors text-slate-400"><HardDrive size={16} /></button>}
                         </div>
-                      </td>
-                      <td className="px-10 py-6 text-right">
-                         <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <button onClick={() => setEditingIdentity(m)} className="p-3 bg-white text-slate-300 hover:text-orange-600 hover:bg-orange-50 rounded-xl transition-all shadow-sm"><Edit3 size={18} /></button>
-                            <button onClick={() => setEditingQuota(m)} className="p-3 bg-white text-slate-300 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-all shadow-sm"><HardDrive size={18} /></button>
-                            <button onClick={() => {
-                               showConfirm('Purge User?', `Hapus identitas "${m.name}"?`, async () => {
-                                  await api.postData('manageMember', { type: 'delete', targetId: m.studentId, role: m.role });
-                                  fetchMembers();
-                               });
-                            }} className="p-3 bg-white text-slate-300 hover:text-red-600 hover:bg-red-50 rounded-xl transition-all shadow-sm"><Trash2 size={18} /></button>
-                         </div>
                       </td>
                     </tr>
                   );
                 })}
               </tbody>
+
             </table>
           </div>
           <div className="px-10 py-6 border-t border-slate-100 flex justify-end">
-             <TablePagination page={memberPage} totalPages={memberTotalPages} totalRows={filteredMembers.length} pageSize={memberPageSize} onPageChange={setMemberPage} />
+             <TablePagination page={activeTab === 'STUDENT' ? studentPage : lecturerPage} totalPages={activeTab === 'STUDENT' ? studentTotalPages : lecturerTotalPages} totalRows={currentFiltered.length} pageSize={pageSize} onPageChange={activeTab === 'STUDENT' ? setStudentPage : setLecturerPage} />
           </div>
           </>
         ) : (
@@ -705,8 +741,9 @@ const MemberManagementView: React.FC<MemberManagementViewProps> = ({ userRole, s
                  </div>
                  <h4 className="text-2xl font-black text-slate-900 tracking-tighter mb-2 leading-tight">{s.name}</h4>
                  <div className="flex items-center gap-3 text-[10px] font-black text-slate-400 uppercase tracking-widest mb-10">
-                    <Users size={14} className="text-orange-600" /> {s.memberCount || 0} Members
+                    <Users size={14} className="text-orange-600" /> {students.filter(m => m.studentType === 'STARTUP' && m.startupId === s.id).length} Members
                  </div>
+                 <details className="mb-6"><summary className="cursor-pointer font-bold text-sm">Struktur Tim</summary><div className="mt-4 space-y-4">{STARTUP_POSITIONS.map(position => <section key={position}><h5 className="text-xs font-black uppercase text-slate-500">{STARTUP_POSITION_LABELS[position]}</h5><ul className="mt-1 text-sm text-slate-800">{students.filter(m => m.studentType === 'STARTUP' && m.startupId === s.id && m.startupPosition === position).map(m => <li key={m.studentId}>{m.name}</li>)}{!students.some(m => m.studentType === 'STARTUP' && m.startupId === s.id && m.startupPosition === position) && <li className="text-slate-400">Belum diisi</li>}</ul></section>)}</div></details>
                  <div className="flex gap-2">
                     <button onClick={() => { setStartupLogoPreview(s.logoUrl || null); setShowStartupModal({ isOpen: true, mode: 'edit', item: s }); }} className="flex-1 py-3.5 bg-white text-slate-900 border border-slate-200 rounded-xl font-black text-[9px] uppercase tracking-widest flex items-center justify-center gap-2 hover:bg-slate-50 transition-all shadow-sm">Edit</button>
                     <button onClick={() => {
@@ -756,21 +793,22 @@ const MemberManagementView: React.FC<MemberManagementViewProps> = ({ userRole, s
                         <div className="space-y-1">
                            <label className="text-[9px] font-black text-orange-600 uppercase ml-2">Student Ecosystem Tier</label>
                            <div className="flex bg-white p-1 rounded-xl shadow-sm border border-orange-100">
-                              <button type="button" onClick={() => setNewStudentType('STARTUP')} className={`flex-1 py-2.5 rounded-lg font-black text-[9px] uppercase tracking-widest flex items-center justify-center gap-2 transition-all ${newStudentType === 'STARTUP' ? 'bg-orange-600 text-white shadow-lg' : 'text-slate-400 hover:bg-slate-50'}`}><Rocket size={14}/> Startup</button>
-                              <button type="button" onClick={() => setNewStudentType('NON_STARTUP')} className={`flex-1 py-2.5 rounded-lg font-black text-[9px] uppercase tracking-widest flex items-center justify-center gap-2 transition-all ${newStudentType === 'NON_STARTUP' ? 'bg-slate-900 text-white shadow-lg' : 'text-slate-400 hover:bg-slate-50'}`}><User size={14}/> Non-Startup</button>
+                              <button type="button" onClick={() => { setNewStudentType('STARTUP'); setNewStartupPosition('MEMBER'); }} className={`flex-1 py-2.5 rounded-lg font-black text-[9px] uppercase tracking-widest flex items-center justify-center gap-2 transition-all ${newStudentType === 'STARTUP' ? 'bg-orange-600 text-white shadow-lg' : 'text-slate-400 hover:bg-slate-50'}`}><Rocket size={14}/> Startup</button>
+                              <button type="button" onClick={() => { setNewStudentType('NON_STARTUP'); setNewStartupId(''); setNewStartupPosition(null); }} className={`flex-1 py-2.5 rounded-lg font-black text-[9px] uppercase tracking-widest flex items-center justify-center gap-2 transition-all ${newStudentType === 'NON_STARTUP' ? 'bg-slate-900 text-white shadow-lg' : 'text-slate-400 hover:bg-slate-50'}`}><User size={14}/> Non-Startup</button>
                            </div>
                         </div>
 
                         {newStudentType === 'STARTUP' && (
                           <div className="space-y-1 animate-in slide-in-from-top-2">
                              <label className="text-[9px] font-black text-orange-600 uppercase ml-2">Startup Cluster</label>
-                             <select name="startupId" required className="w-full px-6 py-4 bg-white border border-orange-100 rounded-2xl font-bold outline-none">
+                             <select name="startupId" value={newStartupId} onChange={e => { setNewStartupId(e.target.value); setNewStartupPosition('MEMBER'); }} required className="w-full px-6 py-4 bg-white border border-orange-100 rounded-2xl font-bold outline-none">
                                 <option value="">-- Pilih Tim --</option>
                                 {startups.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                              </select>
                           </div>
                         )}
 
+                        {newStudentType === 'STARTUP' && <StartupPositionSelect value={newStartupPosition} onChange={setNewStartupPosition} />}
                         <div className="space-y-1">
                            <label className="text-[9px] font-black text-orange-600 uppercase ml-2">Official JobDesk</label>
                            <select name="studentJobDesk" className="w-full px-6 py-4 bg-white border border-orange-100 rounded-2xl font-bold outline-none appearance-none">
@@ -810,7 +848,7 @@ const MemberManagementView: React.FC<MemberManagementViewProps> = ({ userRole, s
                 <div className="flex items-center gap-5">
                    <div className="w-14 h-14 bg-slate-900 rounded-2xl flex items-center justify-center text-white shadow-xl"><ShieldAlert size={28} /></div>
                    <div className="flex flex-col">
-                      <h3 className="text-3xl font-black text-slate-900 tracking-tighter leading-none">Identity Override</h3>
+                      <h3 className="text-3xl font-black text-slate-900 tracking-tighter leading-none">{editingIdentity.role === UserRole.STUDENT ? 'Edit Detail Mahasiswa' : 'Identity Override'}</h3>
                       <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-2">Authority Control Protocol V7.3</p>
                    </div>
                 </div>
@@ -828,25 +866,22 @@ const MemberManagementView: React.FC<MemberManagementViewProps> = ({ userRole, s
                      <>
                         <div className="space-y-3">
                           <label className="text-[10px] font-black text-slate-400 uppercase px-2">Ecosystem Routing</label>
-                          <select name="studentType" defaultValue={editingIdentity.studentType || 'NON_STARTUP'} className="w-full px-6 py-4 bg-slate-50 rounded-2xl font-bold outline-none focus:ring-4 focus:ring-orange-100/50">
+                          <select name="studentType" value={editingIdentity.studentType || 'NON_STARTUP'} onChange={e => setEditingIdentity({ ...editingIdentity, studentType: e.target.value, startupId: null, startupPosition: e.target.value === 'STARTUP' ? 'MEMBER' : null })} className="w-full px-6 py-4 bg-slate-50 rounded-2xl font-bold outline-none focus:ring-4 focus:ring-orange-100/50">
                              <option value="NON_STARTUP">Non-Startup Member</option>
                              <option value="STARTUP">Startup Member</option>
                           </select>
                         </div>
                         <div className="space-y-3">
                           <label className="text-[10px] font-black text-slate-400 uppercase px-2">Startup Assignment</label>
-                          <select name="startupId" defaultValue={editingIdentity.startupId} className="w-full px-6 py-4 bg-slate-50 rounded-2xl font-bold outline-none">
-                             <option value="">Global HUB Cluster</option>
+                          <select name="startupId" required={editingIdentity.studentType === 'STARTUP'} disabled={editingIdentity.studentType !== 'STARTUP'} value={editingIdentity.startupId || ''} onChange={e => setEditingIdentity({ ...editingIdentity, startupId: e.target.value || null, startupPosition: 'MEMBER' })} className="w-full px-6 py-4 bg-slate-50 rounded-2xl font-bold outline-none">
+                             <option value="">Pilih startup</option>
                              {startups.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                           </select>
                         </div>
+                        {editingIdentity.studentType === 'STARTUP' && <StartupPositionSelect value={editingIdentity.startupPosition ?? 'MEMBER'} onChange={startupPosition => setEditingIdentity({ ...editingIdentity, startupPosition })} />}
                         <div className="md:col-span-2">
                            <label className="text-[10px] font-black text-slate-400 uppercase mb-3 block px-2">Official JobDesk Assignment</label>
-                           <select name="studentJobDesk" defaultValue={editingIdentity.studentJobDesk} className="w-full px-7 py-5 bg-slate-50 rounded-[1.8rem] font-bold outline-none">
-                              <option value="Non Jobdesk">Non-Jobdesk</option>
-                              <option value="Asisten Lab">Asisten Lab (ASLAB)</option>
-                              <option value="PIC Lab">PIC Lab (PIC)</option>
-                           </select>
+                           <input name="studentJobDesk" defaultValue={editingIdentity.studentJobDesk || ''} placeholder="Job Desk operasional" className="w-full px-7 py-5 bg-slate-50 rounded-[1.8rem] font-bold outline-none" />
                         </div>
                      </>
                    ) : (
@@ -1004,7 +1039,7 @@ const MemberManagementView: React.FC<MemberManagementViewProps> = ({ userRole, s
             {transferMode === 'export' ? (
               <div className="space-y-6">
                 <div className="p-6 rounded-3xl bg-emerald-50 border border-emerald-100 text-sm font-bold text-emerald-800">
-                  Export mengikuti pencarian aktif: <span className="font-black">{search || 'Semua data'}</span>. Password dan hash password tidak pernah diekspor.
+                  Export mengikuti pencarian aktif: <span className="font-black">{(activeTab === 'STUDENT' ? studentSearch : lecturerSearch) || 'Semua data'}</span>. Password dan hash password tidak pernah diekspor.
                 </div>
                 <button onClick={handleMemberExport} disabled={isTransferProcessing} className="w-full py-5 bg-emerald-600 text-white rounded-2xl font-black uppercase tracking-widest flex items-center justify-center gap-3">
                   {isTransferProcessing ? <Loader2 className="animate-spin" size={18} /> : <Download size={18} />} Download {transferFormat.toUpperCase()}
