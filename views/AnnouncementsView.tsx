@@ -17,18 +17,42 @@ interface AnnouncementsViewProps {
  * Mengelola sistem siaran Hub.
  * UPDATED V6.3.0: Added micro-animations for button processing states.
  */
-const AnnouncementsView: React.FC<AnnouncementsViewProps> = ({ 
-  announcements, 
+const AnnouncementsView: React.FC<AnnouncementsViewProps> = ({
+  announcements,
   startups,
   onRefresh,
   isAdmin,
+  userRole,
+  userStartupId,
   currentUser,
+  onShowAlert,
   showConfirm
 }) => {
   const [targetType, setTargetType] = useState<'ALL' | 'ROLE' | 'STARTUP'>('ALL');
   const [targetValue, setTargetValue] = useState('');
   const [isPublishing, setIsPublishing] = useState(false);
-  const announcementsList = Array.isArray(announcements) ? announcements : [];
+  const baseList = Array.isArray(announcements) ? announcements : [];
+  const announcementsList = React.useMemo(() => {
+    if (isAdmin) return baseList;
+    return baseList.filter(ann => {
+      const { type, value } = ann.target || { type: 'ALL' };
+      if (type === 'ALL') return true;
+      if (type === 'ROLE' && value === userRole) return true;
+      if (type === 'STARTUP' && value === userStartupId) return true;
+      return false;
+    });
+  }, [baseList, isAdmin, userRole, userStartupId]);
+
+  
+  const getTargetLabel = (target?: { type: string, value?: string }) => {
+    if (!target || target.type === 'ALL') return 'GLOBAL HUB';
+    if (target.type === 'ROLE') return `ROLE ${(target.value || '').replace('ROLE_', '')}`;
+    if (target.type === 'STARTUP') {
+      const startup = startups.find(s => s.id === target.value);
+      return startup ? `STARTUP: ${startup.name}` : `STARTUP: ${target.value}`;
+    }
+    return `${target.type} ${target.value || ''}`;
+  };
 
   const handlePublish = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -59,7 +83,7 @@ const AnnouncementsView: React.FC<AnnouncementsViewProps> = ({
       'Apakah Anda yakin ingin menghapus transmisi siaran ini secara permanen dari mainframe?',
       async () => {
         const res = await api.postData('deleteAnnouncement', { id });
-        if(res?.status === 'success') onRefresh();
+        if(res?.status === 'success') { onRefresh(); onShowAlert('Transmission Purged', 'Broadcast berhasil dihapus dari mainframe!', 'success'); }
       }
     );
   };
@@ -73,7 +97,7 @@ const AnnouncementsView: React.FC<AnnouncementsViewProps> = ({
         </div>
       </div>
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 items-start">
-        {(isAdmin || currentUser !== 'GUEST') && (
+        {isAdmin && (
           <div className="lg:col-span-5 space-y-8">
             <section className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-2xl relative overflow-hidden">
               <h2 className="text-2xl font-black text-slate-900 mb-8 flex items-center gap-3 tracking-tight">
@@ -149,7 +173,7 @@ const AnnouncementsView: React.FC<AnnouncementsViewProps> = ({
           </div>
         )}
 
-        <div className={(isAdmin || currentUser !== 'GUEST') ? "lg:col-span-7 space-y-8" : "lg:col-span-12 space-y-8"}>
+        <div className={isAdmin ? "lg:col-span-7 space-y-8" : "lg:col-span-12 space-y-8"}>
           <h2 className="text-2xl font-black text-slate-900 tracking-tight">Transmission Feed</h2>
           <div className="space-y-8 max-h-[850px] overflow-y-auto pr-4 scrollbar-hide">
             {announcementsList.length === 0 ? (
@@ -173,7 +197,7 @@ const AnnouncementsView: React.FC<AnnouncementsViewProps> = ({
                       </div>
                       <div className="flex items-center gap-3">
                         <span className="px-4 py-1.5 bg-orange-50 text-orange-600 text-[9px] font-black rounded-xl uppercase tracking-widest">
-                          {ann.target?.type} {ann.target?.value || ''}
+                          {getTargetLabel(ann.target)}
                         </span>
                         {canManage && <button onClick={() => handleDelete(ann.id)} className="p-2 text-slate-200 hover:text-red-500 transition-colors"><Trash2 size={20}/></button>}
                       </div>

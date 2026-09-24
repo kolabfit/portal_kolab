@@ -2,6 +2,7 @@ import express from 'express';
 import db from '../lib/db.js';
 import { record } from '../lib/serializers.js';
 import { listRepository } from '../lib/repository.js';
+import { sanitizeArticleHtml } from '../lib/articleHtml.js';
 import { requireSession } from '../lib/session.js';
 import { listInternships } from '../lib/internships.js';
 
@@ -135,13 +136,14 @@ router.get('/articles', async (req, res) => {
   try {
     const [rows] = await db.execute('SELECT * FROM articles');
     const articles = rows.map(record);
+    articles.forEach(article => { article.content = sanitizeArticleHtml(article.content); });
     
     if (articles.length > 0) {
       const articleIds = articles.map(a => a.id);
       const placeholders = articleIds.map(() => '?').join(',');
       
       const [tagRows] = await db.execute(`SELECT m.article_id, t.id, t.name, t.slug FROM article_tag_map m JOIN article_tags t ON m.tag_id = t.id WHERE m.article_id IN (${placeholders})`, articleIds);
-      const [attRows] = await db.execute(`SELECT id, article_id, file_id, original_name, mime_type, size FROM article_attachments WHERE article_id IN (${placeholders})`, articleIds);
+      const [attRows] = await db.execute(`SELECT id, article_id, file_id, original_name, mime_type, size, storage_provider FROM article_attachments WHERE article_id IN (${placeholders})`, articleIds);
       
       const tagsByArticle = {};
       tagRows.forEach(r => {
@@ -152,7 +154,8 @@ router.get('/articles', async (req, res) => {
       const attsByArticle = {};
       attRows.forEach(r => {
         if (!attsByArticle[r.article_id]) attsByArticle[r.article_id] = [];
-        attsByArticle[r.article_id].push({ id: r.id, fileId: r.file_id, originalName: r.original_name, mimeType: r.mime_type, size: r.size, url: `/api/files/${r.file_id}` });
+        const origin = (process.env.PUBLIC_API_URL || `${req.protocol}://${req.get('host')}/api`).replace(/\/$/, '');
+        attsByArticle[r.article_id].push({ id: r.id, fileId: r.file_id, originalName: r.original_name, mimeType: r.mime_type, size: Number(r.size), url: r.storage_provider === 'KROOMBOX_CDN' ? `${origin}/assets/${encodeURIComponent(r.file_id)}/access` : `${origin}/files/${encodeURIComponent(r.file_id)}` });
       });
       
       articles.forEach(a => {
@@ -189,9 +192,9 @@ router.get('/tags', async (req, res) => {
 
 // Both legacy GET and the UI POST use the same MySQL serializer.
 router.get('/getRepoFiles', requireSession, async (req, res, next) => {
-  try { res.json(await listRepository(req.user)); } catch (error) { next(error); }
+  try { res.json(await listRepository(req.user, false, process.env.PUBLIC_API_URL || `${req.protocol}://${req.get('host')}/api`)); } catch (error) { next(error); }
 });
 router.get('/getAdminRepoData', requireSession, async (req, res, next) => {
-  try { res.json(await listRepository(req.user, true)); } catch (error) { next(error); }
+  try { res.json(await listRepository(req.user, true, process.env.PUBLIC_API_URL || `${req.protocol}://${req.get('host')}/api`)); } catch (error) { next(error); }
 });
 export default router;

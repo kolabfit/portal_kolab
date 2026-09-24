@@ -46,9 +46,7 @@ const MeetingsView: React.FC<MeetingsViewProps> = ({ meetings, isAdmin, currentU
 
   const filteredMeetings = useMemo(() => {
     const raw = (Array.isArray(meetings) ? meetings : []);
-    const authorized = isAdmin ? raw : raw.filter(m => 
-      m.organizer === 'Administrator' || m.author === currentUser
-    );
+    const authorized = raw;
     
     return authorized.filter(m => 
       m.title.toLowerCase().includes(filterText.toLowerCase()) || 

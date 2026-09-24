@@ -24,6 +24,8 @@ const RepoView: React.FC<RepoViewProps> = ({ profile, onShowAlert, isAdmin, asse
   const [stats, setStats] = useState<GlobalRepoStats | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [syncMessage, setSyncMessage] = useState('');
+  const fetching = useRef(false);
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [search, setSearch] = useState('');
   const [currentFolder, setCurrentFolder] = useState<string>('ROOT');
@@ -57,8 +59,10 @@ const RepoView: React.FC<RepoViewProps> = ({ profile, onShowAlert, isAdmin, asse
     return () => window.removeEventListener('click', handleGlobalClick);
   }, [contextMenu]);
 
-  const fetchData = async () => {
-    setIsLoading(true);
+  const fetchData = useCallback(async (background = false) => {
+    if (fetching.current) return;
+    fetching.current = true;
+    if (!background) setIsLoading(true);
     setIsSyncing(true);
     try {
       const payload = isAdmin ? {} : { id: profile.id, role: profile.role };
@@ -67,15 +71,37 @@ const RepoView: React.FC<RepoViewProps> = ({ profile, onShowAlert, isAdmin, asse
       if (result && result.items) {
         setItems(result.items);
         setStats(result.globalStats);
+        setSyncMessage(result.cdnSync?.status === 'unavailable'
+          ? result.cdnSync.message : result.cdnSync?.status === 'success' ? 'Tersinkron dengan CDN · pembaruan otomatis setiap 30 detik' : '');
+        setPreviewItem(previous => previous ? result.items.find((item: RepoItem) => item.id === previous.id) || null : null);
       } else if (Array.isArray(result)) {
         setItems(result);
-      }
-    } catch (err) { console.error("Repository Sync Failure", err); }
-    setIsLoading(false);
-    setTimeout(() => setIsSyncing(false), 500);
-  };
+      } else setSyncMessage('Sinkronisasi tertunda. Daftar terakhir tetap ditampilkan.');
+    } catch (err) {
+      console.error("Repository Sync Failure", err);
+      setSyncMessage('Sinkronisasi tertunda. Daftar terakhir tetap ditampilkan.');
+    } finally {
+      fetching.current = false;
+      setIsLoading(false);
+      setIsSyncing(false);
+    }
+  }, [isAdmin, profile.id, profile.role]);
 
-  useEffect(() => { fetchData(); }, [isAdmin, profile.id]);
+  useEffect(() => {
+    void fetchData();
+    const refresh = () => { if (document.visibilityState === 'visible') void fetchData(true); };
+    const timer = window.setInterval(refresh, 30000);
+    window.addEventListener('focus', refresh);
+    return () => { window.clearInterval(timer); window.removeEventListener('focus', refresh); };
+  }, [fetchData]);
+
+  useEffect(() => {
+    if (!isLoading && currentFolder !== 'ROOT' && !currentFolder.startsWith('VIRTUAL_') &&
+        !currentFolder.startsWith('OWNER_') && !items.some(item => item.id === currentFolder)) {
+      setCurrentFolder('ROOT');
+      setBreadcrumbs([]);
+    }
+  }, [items, currentFolder, isLoading]);
 
   const formatSize = (bytes: number) => {
     if (!bytes || bytes === 0) return '0 B';
@@ -181,7 +207,7 @@ const RepoView: React.FC<RepoViewProps> = ({ profile, onShowAlert, isAdmin, asse
         onShowAlert('Label Diperbarui', 'Nama file telah berhasil diubah.', 'success');
         setShowRenameModal(null);
         fetchData();
-      }
+      } else onShowAlert('Gagal mengubah nama', res?.message || 'CDN belum dapat memperbarui file.', 'error');
       setIsProcessing(false);
     } else setShowRenameModal(null);
   };
@@ -245,6 +271,7 @@ const RepoView: React.FC<RepoViewProps> = ({ profile, onShowAlert, isAdmin, asse
         <div className="flex flex-col md:flex-row items-start justify-between gap-10">
           <div className="flex-1">
             <h2 className="text-5xl font-black text-slate-900 tracking-tighter leading-none">Repository</h2>
+            {syncMessage && <p role="status" className="mt-3 text-xs text-slate-500">{syncMessage}</p>}
             <div className="flex items-center gap-3 mt-6 overflow-x-auto pb-2 scrollbar-hide">
                <button onClick={() => { setCurrentFolder('ROOT'); setBreadcrumbs([]); }} className={`p-4 rounded-[1.5rem] transition-all shadow-sm ${currentFolder === 'ROOT' ? 'bg-orange-600 text-white' : 'bg-white border border-slate-100 text-orange-600'}`}><HardDrive size={20}/></button>
                {breadcrumbs.map((b, idx) => (
@@ -258,7 +285,7 @@ const RepoView: React.FC<RepoViewProps> = ({ profile, onShowAlert, isAdmin, asse
 
           <div className="flex flex-col md:flex-row gap-4 w-full md:w-auto">
             <button 
-              onClick={fetchData}
+              onClick={() => void fetchData()}
               className="p-3.5 bg-white border border-slate-100 text-slate-400 hover:text-orange-600 rounded-2xl shadow-sm transition-all hover:shadow-md active:scale-95 group"
               title="Sync Node"
             >
@@ -402,7 +429,7 @@ const RepoView: React.FC<RepoViewProps> = ({ profile, onShowAlert, isAdmin, asse
         <div className="fixed z-[9999] bg-white/90 backdrop-blur-xl rounded-[2rem] shadow-2xl border border-white py-3 w-56 animate-in fade-in zoom-in-95 duration-200" style={{ left: contextMenu.x, top: contextMenu.y }}>
           <button onClick={() => setShowRenameModal(contextMenu.item)} className="w-full flex items-center gap-4 px-6 py-2.5 hover:bg-white text-[9px] font-black uppercase tracking-widest text-slate-600 transition-colors"><Edit3 size={14} className="text-orange-600"/> Rename File</button>
           <button onClick={() => { setClipboard({ action: 'copy', item: contextMenu.item }); setContextMenu(null); onShowAlert('File Disalin', 'File siap ditempel.', 'info'); }} className="w-full flex items-center gap-4 px-6 py-2.5 hover:bg-white text-[9px] font-black uppercase tracking-widest text-slate-600 transition-colors"><Copy size={14} className="text-orange-600"/> Copy File</button>
-          <button onClick={() => { showConfirm('Purge File?', `Hapus "${contextMenu.item.name}"?`, async () => { await api.postData('deleteRepoItem', { id: contextMenu.item.id, id_owner: profile.id, role: profile.role }); fetchData(); }); }} className="w-full flex items-center gap-4 px-6 py-2.5 hover:bg-red-50 text-[9px] font-black uppercase tracking-widest text-red-500 transition-colors"><Trash2 size={14}/> Delete</button>
+          <button onClick={() => { showConfirm('Purge File?', `Hapus "${contextMenu.item.name}"?`, async () => { const result = await api.postData('deleteRepoItem', { id: contextMenu.item.id, id_owner: profile.id, role: profile.role }); if (result?.status !== 'success') onShowAlert('Gagal menghapus', result?.message || 'CDN belum mengonfirmasi penghapusan file.', 'error'); fetchData(); }); }} className="w-full flex items-center gap-4 px-6 py-2.5 hover:bg-red-50 text-[9px] font-black uppercase tracking-widest text-red-500 transition-colors"><Trash2 size={14}/> Delete</button>
         </div>
       )}
 

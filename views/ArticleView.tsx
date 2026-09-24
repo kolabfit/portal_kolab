@@ -1,4 +1,4 @@
-
+﻿
 import React, { useState, useMemo, useRef } from 'react';
 import { 
   Search, Plus, Edit2, Trash2, Tag, 
@@ -10,6 +10,20 @@ import { Article, ArticleCategory } from '../types';
 import { api } from '../api';
 import Modal from '../components/Modal';
 import { ArticleTagSelect } from '../components/ArticleTagSelect';
+import RichTextEditor from '../components/article/RichTextEditor';
+import { sanitizeArticleHtml, isRichTextEmpty } from '../lib/articleHtml';
+import { prepareArticleMedia } from '../lib/articleMedia';
+
+const articleStyles = <style>{`
+        .article-editor-content h1, .article-editor-content h2, .article-editor-content h3 { font-weight: 900; margin-top: 1.5rem; margin-bottom: 0.75rem; color: #0f172a; }
+        .article-editor-content h2 { font-size: 1.5rem; }
+        .article-editor-content h3 { font-size: 1.25rem; }
+        .article-editor-content b, .article-editor-content strong { font-weight: 700; }
+        .article-editor-content i, .article-editor-content em { font-style: italic; }
+        .article-editor-content p { line-height: 1.8; margin-bottom: 1.25rem; color: #334155; }
+        .article-editor-content ul { list-style-type: disc; padding-left: 1.5rem; margin-bottom: 1.25rem; }
+        .article-editor-content ol { list-style-type: decimal; padding-left: 1.5rem; margin-bottom: 1.25rem; }
+      `}</style>;
 
 interface ArticleViewProps {
   articles: Article[];
@@ -21,6 +35,13 @@ interface ArticleViewProps {
   onRefresh?: () => void;
   showConfirm: (title: string, message: string, onConfirm: () => void) => void;
 }
+
+const getWIBDateTime = () => {
+  const d = new Date();
+  const options = { timeZone: 'Asia/Jakarta', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' };
+  const str = new Intl.DateTimeFormat('sv-SE', options).format(d);
+  return str.replace(' ', 'T');
+};
 
 const ArticleView: React.FC<ArticleViewProps> = ({ 
   articles, categories, tags = [], isAdmin, currentUser, onAction, onRefresh, showConfirm 
@@ -39,21 +60,32 @@ const ArticleView: React.FC<ArticleViewProps> = ({
   const [tagIds, setTagIds] = useState<string[]>([]);
   const [attachments, setAttachments] = useState<any[]>([]);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
-  const [dateStr, setDateStr] = useState(new Date().toISOString().split('T')[0]);
+  const [dateStr, setDateStr] = useState(getWIBDateTime());
+  const draftId = useRef('');
+  const submitting = useRef(false);
+  const thumbnailUpload = useRef<any>(null);
+  const [contentHtml, setContentHtml] = useState('');
+  const [submitStage, setSubmitStage] = useState<'IDLE' | 'VALIDATING' | 'UPLOADING_MEDIA' | 'SAVING_ARTICLE' | 'COMPLETED' | 'FAILED'>('IDLE');
 
   React.useEffect(() => {
+    if (showForm) {
+      draftId.current = editingItem?.id || `art-${crypto.randomUUID()}`;
+      thumbnailUpload.current = null;
+      setContentHtml(editingItem?.content || '');
+      setSubmitStage('IDLE');
+    }
     if (editingItem && showForm) {
       setTitle(editingItem.title || '');
-      setDateStr(editingItem.date ? editingItem.date.slice(0, 10) : new Date().toISOString().split('T')[0]);
+      setDateStr(editingItem.date ? editingItem.date.replace(' ', 'T').slice(0, 16) : getWIBDateTime());
       setCategoryId(editingItem.categoryId || '');
-      setTagIds(editingItem.tagList ? editingItem.tagList.map((t: any) => t.id) : []);
+      setTagIds(editingItem.tagList?.length ? editingItem.tagList.map((t: any) => t.id) : (editingItem.tags || []));
       setAttachments(editingItem.attachments || []);
       setSelectedFiles([]);
       setPreviewImage(editingItem.imageUrl || null);
       setValidationError(null);
     } else if (showForm && !editingItem) {
       setTitle('');
-      setDateStr(new Date().toISOString().split('T')[0]);
+      setDateStr(getWIBDateTime());
       setCategoryId('');
       setTagIds([]);
       setAttachments([]);
@@ -77,37 +109,57 @@ const ArticleView: React.FC<ArticleViewProps> = ({
       .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   }, [articles, searchTerm]);
 
-  const execCommand = (command: string, value: string = '') => {
-    document.execCommand(command, false, value);
-    if (editorRef.current) editorRef.current.focus();
-  };
-
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    setIsProcessing(true);
+    if (submitting.current) return;
+    // Freeze the current DOM and all form inputs BEFORE any state update/await.
     const fd = new FormData(e.currentTarget);
-    const trimmedTitle = title.trim();
-    const htmlContent = editorRef.current?.innerHTML || '';
-    const articleId = editingItem?.id || `art-${Date.now()}`;
-    let finalImageUrl = editingItem?.imageUrl || '';
-    if (imagePreview && imagePreview.startsWith('data:')) {
-      const res = await api.uploadFile(imagePreview, `${articleId}.png`, editingItem?.imageUrl, 'asetweb');
-      if (res?.status === 'success') finalImageUrl = res.url;
-      else { window.alert(res?.message || 'Upload gambar gagal.'); setIsProcessing(false); return; }
-    }
-    const data = {
-        title: trimmedTitle, author: editingItem ? editingItem.author : currentUser,
-        date: dateStr, categoryId: categoryId, tags: [],
-        content: htmlContent, imageUrl: finalImageUrl, videoUrl: fd.get('videoUrl'), otherUrl: fd.get('otherUrl')
-      };
-    const saved = await onAction(editingItem ? 'edit' : 'add', articleId, data);
-    if (saved === false) { setIsProcessing(false); return; }
-    setShowForm(false); setEditingItem(null); setPreviewImage(null); setIsProcessing(false);
+    const snapshot = {
+      id: draftId.current, type: editingItem ? 'edit' as const : 'add' as const,
+      title: title.trim(), date: dateStr, categoryId, tags: [...tagIds],
+      content: sanitizeArticleHtml(editorRef.current?.innerHTML ?? contentHtml),
+      author: editingItem?.author || currentUser,
+      imageUrl: editingItem?.imageUrl || '', imagePreview,
+      thumbnail: thumbnailUpload.current,
+      attachments: attachments.map(attachment => ({ ...attachment })), files: [...selectedFiles],
+      videoUrl: fd.get('videoUrl'), otherUrl: fd.get('otherUrl'),
+    };
+    submitting.current = true;
+    setIsProcessing(true); setValidationError(null); setSubmitStage('VALIDATING');
+    try {
+      if (!snapshot.title || !snapshot.categoryId || !snapshot.date) throw new Error('Judul, tanggal, dan kategori wajib diisi.');
+      if (isRichTextEmpty(snapshot.content)) throw new Error('Isi artikel wajib diisi.');
+      if (snapshot.attachments.length + snapshot.files.length > 5) throw new Error('Maksimal 5 lampiran.');
+      setSubmitStage('UPLOADING_MEDIA');
+      const media = await prepareArticleMedia(snapshot, api, {
+        thumbnail: (asset: any) => { thumbnailUpload.current = asset; },
+        attachments: setAttachments,
+        uploaded: (file: File) => setSelectedFiles(previous => previous.filter(selected => selected !== file)),
+      });
+      if (media.imageUrl) setPreviewImage(media.imageUrl);
+      setSubmitStage('SAVING_ARTICLE');
+      const saved = await onAction(snapshot.type, snapshot.id, {
+        title: snapshot.title, date: snapshot.date, categoryId: snapshot.categoryId,
+        tags: snapshot.tags, content: snapshot.content, author: snapshot.author,
+        imageUrl: media.imageUrl, attachments: media.attachments,
+        videoUrl: snapshot.videoUrl, otherUrl: snapshot.otherUrl,
+      });
+      if (saved !== true) throw new Error('Artikel belum tersimpan. Data form dan file yang berhasil diunggah tetap tersedia untuk dicoba kembali.');
+      setSubmitStage('COMPLETED');
+      setShowForm(false); setEditingItem(null); setPreviewImage(null);
+      // Refresh only after a confirmed save and closing the form; it cannot
+      // unmount a pending editor or turn a completed save into a failed retry.
+      void Promise.resolve(onRefresh?.()).catch(() => {});
+    } catch (error) {
+      setSubmitStage('FAILED');
+      setValidationError(error instanceof Error ? error.message : 'Artikel gagal disimpan.');
+    } finally { submitting.current = false; setIsProcessing(false); }
   };
 
   if (selectedArticle) {
     return (
       <div className="max-w-5xl mx-auto space-y-10 animate-in fade-in slide-in-from-bottom-4 duration-500 pb-24">
+        {articleStyles}
         <button onClick={() => setSelectedArticle(null)} className="flex items-center gap-3 text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-orange-600 transition-colors">
           <ChevronLeft size={16} /> Kembali ke Indeks
         </button>
@@ -121,11 +173,13 @@ const ArticleView: React.FC<ArticleViewProps> = ({
                <h2 className="text-6xl font-black text-white tracking-tighter leading-tight">{selectedArticle.title}</h2>
                <div className="flex items-center gap-8 mt-8 border-t border-white/10 pt-8">
                   <div className="flex items-center gap-3"><div className="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center text-white font-black text-xs">{selectedArticle.author[0]}</div><span className="text-xs font-black text-white uppercase tracking-widest">{selectedArticle.author}</span></div>
-                  <div className="flex items-center gap-3 text-slate-400 text-xs font-black uppercase tracking-widest"><Calendar size={18}/> {selectedArticle.date}</div>
+                  <div className="flex items-center gap-3 text-slate-400 text-xs font-black uppercase tracking-widest"><Calendar size={18}/> {new Date(selectedArticle.date.replace(' ', 'T').slice(0, 19) + '+07:00').toLocaleString('id-ID', { timeZone: 'Asia/Jakarta', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' })} WIB</div>
                </div>
             </div>
           </div>
-          <div className="p-12 lg:p-20 article-editor-content prose prose-xl max-w-none prose-slate" dangerouslySetInnerHTML={{ __html: selectedArticle.content }} />
+          <div className="p-12 lg:p-20 article-editor-content prose prose-xl max-w-none prose-slate" dangerouslySetInnerHTML={{ __html: sanitizeArticleHtml(selectedArticle.content) }} />
+          {!!selectedArticle.tagList?.length && <div className="px-12 pb-6 flex flex-wrap gap-2">{selectedArticle.tagList.map(tag => <span key={tag.id} className="rounded-full bg-slate-100 px-3 py-1 text-sm">#{tag.name}</span>)}</div>}
+          {!!selectedArticle.attachments?.length && <div className="px-12 pb-12 space-y-3"><h3 className="font-bold">Lampiran</h3>{selectedArticle.attachments.map(attachment => <a key={attachment.id} href={attachment.url} target="_blank" rel="noopener noreferrer" className="block text-sm text-blue-600 underline">{attachment.originalName}</a>)}</div>}
         </div>
       </div>
     );
@@ -163,7 +217,7 @@ const ArticleView: React.FC<ArticleViewProps> = ({
                     <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">BY {art.author}</span>
                     {canManage && (
                       <div className="flex gap-1" onClick={e => e.stopPropagation()}>
-                        <button onClick={() => { setEditingItem(art); setPreviewImage(art.imageUrl || null); setShowForm(true); }} className="p-2 text-slate-300 hover:text-blue-600"><Edit2 size={14} /></button>
+                        <button aria-label={`Edit ${art.title}`} onClick={() => { setEditingItem(art); setPreviewImage(art.imageUrl || null); setShowForm(true); }} className="p-2 text-slate-300 hover:text-blue-600"><Edit2 size={14} /></button>
                         <button onClick={() => onAction('delete', art.id)} className="p-2 text-slate-300 hover:text-red-600"><Trash2 size={14} /></button>
                       </div>
                     )}
@@ -182,7 +236,7 @@ const ArticleView: React.FC<ArticleViewProps> = ({
                  <p className="text-slate-500 text-sm font-medium mt-1">Buat dan publikasikan artikel baru untuk Portal Ko+Lab.</p>
                </div>
                <button 
-                 onClick={() => setShowForm(false)} 
+                 disabled={isProcessing} onClick={() => setShowForm(false)} 
                  aria-label="Tutup modal"
                  className="p-2 text-slate-400 hover:text-slate-900 hover:bg-slate-100 rounded-xl transition-colors"
                >
@@ -192,6 +246,7 @@ const ArticleView: React.FC<ArticleViewProps> = ({
              
              <div className="overflow-y-auto scrollbar-hide flex-1 p-6 lg:p-8 bg-slate-50/50">
                <form id="article-form" onSubmit={handleSubmit} className="space-y-6">
+                 <fieldset disabled={isProcessing} className="space-y-6 min-w-0">
                   
                   {validationError && (
                     <div className="p-4 bg-red-50 text-red-600 rounded-2xl text-sm font-bold border border-red-100 flex items-center gap-2">
@@ -218,7 +273,7 @@ const ArticleView: React.FC<ArticleViewProps> = ({
                       <input 
                         id="date"
                         name="date" 
-                        type="date" 
+                        type="datetime-local" 
                         value={dateStr}
                         onChange={e => setDateStr(e.target.value)}
                         className="w-full px-5 py-4 bg-white text-slate-900 rounded-2xl font-bold outline-none border border-slate-200 focus:ring-2 focus:ring-yellow-200 focus:border-yellow-400 transition-all shadow-sm" 
@@ -257,6 +312,7 @@ const ArticleView: React.FC<ArticleViewProps> = ({
                          <input type="file" accept="image/jpeg,image/png,image/webp" className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" onChange={e => {
                             const file = e.target.files?.[0];
                             if (file) {
+                               thumbnailUpload.current = null;
                                if (file.size > 5 * 1024 * 1024) return alert('Ukuran gambar maksimal 5MB');
                                const reader = new FileReader();
                                reader.onload = e => setPreviewImage(e.target?.result as string);
@@ -320,37 +376,16 @@ const ArticleView: React.FC<ArticleViewProps> = ({
 
                   <div>
                     <label className="block text-sm font-black text-slate-900 mb-2">Isi Artikel <span className="text-red-500">*</span></label>
-                    <div className="border border-slate-200 rounded-2xl overflow-hidden shadow-sm bg-white focus-within:ring-2 focus-within:ring-yellow-200 focus-within:border-yellow-400 transition-all">
-                       <div className="bg-slate-50 p-2 border-b border-slate-200 flex flex-wrap gap-1">
-                         <button type="button" aria-label="Bold" onClick={() => execCommand('bold')} className="w-9 h-9 flex items-center justify-center rounded-lg text-slate-700 hover:bg-slate-200 hover:text-slate-900 font-bold transition-colors">B</button>
-                         <button type="button" aria-label="Italic" onClick={() => execCommand('italic')} className="w-9 h-9 flex items-center justify-center rounded-lg text-slate-700 hover:bg-slate-200 hover:text-slate-900 font-serif italic transition-colors">I</button>
-                         <div className="w-px h-6 bg-slate-300 mx-1 my-auto" />
-                         <button type="button" aria-label="Heading 2" onClick={() => execCommand('formatBlock', 'H2')} className="w-9 h-9 flex items-center justify-center rounded-lg text-slate-700 hover:bg-slate-200 hover:text-slate-900 font-bold text-sm transition-colors">H2</button>
-                         <button type="button" aria-label="Heading 3" onClick={() => execCommand('formatBlock', 'H3')} className="w-9 h-9 flex items-center justify-center rounded-lg text-slate-700 hover:bg-slate-200 hover:text-slate-900 font-bold text-sm transition-colors">H3</button>
-                         <div className="w-px h-6 bg-slate-300 mx-1 my-auto" />
-                         <button type="button" aria-label="Bullet List" onClick={() => execCommand('insertUnorderedList')} className="w-9 h-9 flex items-center justify-center rounded-lg text-slate-700 hover:bg-slate-200 hover:text-slate-900 transition-colors">
-                           <ul className="list-disc pl-3 text-xs leading-none"><li></li><li></li></ul>
-                         </button>
-                         <button type="button" aria-label="Numbered List" onClick={() => execCommand('insertOrderedList')} className="w-9 h-9 flex items-center justify-center rounded-lg text-slate-700 hover:bg-slate-200 hover:text-slate-900 transition-colors">
-                           <ol className="list-decimal pl-3 text-[10px] leading-none font-bold"><li></li><li></li></ol>
-                         </button>
-                       </div>
-                       <div 
-                         ref={editorRef} 
-                         contentEditable 
-                         className="p-6 min-h-[260px] max-h-[420px] overflow-y-auto outline-none bg-white text-slate-800 text-base leading-relaxed article-editor-content empty:before:content-['Tulis_isi_artikel_di_sini...'] empty:before:text-slate-400 empty:before:pointer-events-none" 
-                         dangerouslySetInnerHTML={{ __html: editingItem?.content || '' }} 
-                       />
-                    </div>
+                    <RichTextEditor ref={editorRef} initialValue={editingItem?.content || ''} disabled={isProcessing} onChange={setContentHtml} />
                   </div>
+                 </fieldset>
                </form>
              </div>
 
              <div className="p-6 lg:p-8 border-t border-slate-100 bg-white shrink-0 flex flex-col sm:flex-row justify-end gap-3">
                <button 
                  type="button" 
-                 disabled={isProcessing}
-                 onClick={() => setShowForm(false)}
+                 disabled={isProcessing} onClick={() => setShowForm(false)}
                  className="px-8 py-4 bg-slate-100 text-slate-700 rounded-2xl font-black uppercase tracking-widest hover:bg-slate-200 transition-colors disabled:opacity-50"
                >
                  Batal
@@ -362,7 +397,7 @@ const ArticleView: React.FC<ArticleViewProps> = ({
                  className="px-8 py-4 bg-slate-900 text-white rounded-2xl font-black uppercase tracking-widest flex items-center justify-center gap-3 hover:bg-slate-800 transition-colors shadow-lg active:scale-[0.98] disabled:opacity-50 sm:w-auto w-full"
                >
                  {isProcessing ? (
-                   <><Loader2 className="animate-spin" size={20} /> MENYIMPAN...</>
+                   <><Loader2 className="animate-spin" size={20} /> {submitStage === 'VALIDATING' ? 'MEMERIKSA DATA...' : submitStage === 'UPLOADING_MEDIA' ? 'MENGUNGGAH / MEMPROSES FILE...' : 'MENYIMPAN ARTIKEL...'}</>
                  ) : (
                    <><Save size={20} /> SIMPAN ARTIKEL</>
                  )}
@@ -371,14 +406,14 @@ const ArticleView: React.FC<ArticleViewProps> = ({
           </div>
         </div>
       )}
-      <style>{`
-        .article-editor-content h1, .article-editor-content h2, .article-editor-content h3 { font-weight: 900; margin-top: 1.5rem; margin-bottom: 0.75rem; color: #0f172a; }
-        .article-editor-content p { line-height: 1.8; margin-bottom: 1.25rem; color: #334155; }
-        .article-editor-content ul { list-style-type: disc; padding-left: 1.5rem; margin-bottom: 1.25rem; }
-        .article-editor-content ol { list-style-type: decimal; padding-left: 1.5rem; margin-bottom: 1.25rem; }
-      `}</style>
+      {articleStyles}
     </div>
   );
 };
 
 export default ArticleView;
+
+
+
+
+

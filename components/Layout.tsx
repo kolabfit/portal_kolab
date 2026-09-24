@@ -1,4 +1,4 @@
-
+﻿
 import React, { useState, useEffect } from 'react';
 import { 
   LayoutDashboard, UserCircle, Calendar, Flag, Info, Megaphone,
@@ -94,8 +94,8 @@ const Layout: React.FC<LayoutProps> = ({ children, activeTab, setActiveTab, user
       >
         <div className="h-full flex flex-col p-6 overflow-hidden">
           <div className="flex items-center gap-4 px-0 mb-10 overflow-hidden min-h-[54px]">
-            <div className="w-[54px] h-[54px] bg-orange-600 rounded-xl flex items-center justify-center text-white shrink-0 overflow-hidden border border-orange-700/10 shadow-lg shadow-orange-200">
-              {logo ? <img src={logo} className="w-full h-full object-cover" alt="Logo" /> : <span className="font-extrabold text-2xl">K</span>}
+            <div className="w-[54px] h-[54px] flex items-center justify-center shrink-0 overflow-hidden shadow-lg shadow-slate-200/50 rounded-xl bg-slate-900">
+              {logo ? <img src={logo} className="w-full h-full object-cover" alt="Logo" /> : <img src="https://i.imgur.com/EGH7u4a.png" className="w-full h-full object-contain p-1 drop-shadow-md" alt="Portal Ko+Lab" />}
             </div>
             <div className={`transition-opacity duration-200 ${(isHovered || isSidebarOpen) ? 'opacity-100' : 'opacity-0'}`}>
               <span className="text-xl font-extrabold block whitespace-nowrap tracking-tight">Portal Kolab</span>
@@ -128,7 +128,7 @@ const Layout: React.FC<LayoutProps> = ({ children, activeTab, setActiveTab, user
         <header className="h-20 bg-white/70 backdrop-blur-xl border-b border-slate-100 flex items-center justify-between px-5 lg:px-10 sticky top-0 z-[40]">
           <div className="flex items-center gap-3">
             <button onClick={() => setIsSidebarOpen(true)} className="p-2.5 text-slate-600 lg:hidden rounded-xl bg-white border border-slate-100 shadow-sm"><Menu size={22} /></button>
-            <div className="lg:hidden w-10 h-10 bg-orange-600 rounded-lg flex items-center justify-center text-white font-black text-lg">K</div>
+            <div className="lg:hidden w-10 h-10 flex items-center justify-center rounded-lg overflow-hidden shadow-md bg-slate-900"><img src={logo || "https://i.imgur.com/EGH7u4a.png"} className="w-full h-full object-contain p-0.5 drop-shadow-md" alt="Portal Ko+Lab" /></div>
           </div>
 
           <div className="flex items-center gap-3 lg:gap-6">
@@ -184,3 +184,6 @@ const Layout: React.FC<LayoutProps> = ({ children, activeTab, setActiveTab, user
 };
 
 export default Layout;
+
+
+

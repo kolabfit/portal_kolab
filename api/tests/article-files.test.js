@@ -1,0 +1,101 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import http from 'node:http';
+import crypto from 'node:crypto';
+import mysql from 'mysql2/promise';
+import dotenv from 'dotenv';
+import jwt from 'jsonwebtoken';
+
+test('article create/edit round trip with CDN attachments and tag relations', async t => {
+  dotenv.config({ path: new URL('../.env', import.meta.url), quiet: true });
+  const database = `portal_article_test_${crypto.randomBytes(6).toString('hex')}`;
+  const control = await mysql.createConnection({ host: process.env.DB_HOST, port: Number(process.env.DB_PORT || 3306), user: process.env.DB_USER, password: process.env.DB_PASSWORD, multipleStatements: true });
+  let db, server, uploads = 0;
+  const cdn = http.createServer((req, res) => {
+    if (req.url === '/api/bridge/upload') {
+      const chunks = [];
+      req.on('data', c => chunks.push(c));
+      req.on('end', () => {
+        assert.match(Buffer.concat(chunks).toString(), /%PDF-test/);
+        uploads++;
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ fileId: `file-${uploads}`, status: 'READY' }));
+      });
+    } else {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ url: '/delivery.pdf?sig=test' }));
+    }
+  });
+  await new Promise(resolve => cdn.listen(0, '127.0.0.1', resolve));
+  await control.query(`CREATE DATABASE \`${database}\`; USE \`${database}\``);
+  t.after(async () => {
+    if (server) await new Promise(resolve => server.close(resolve));
+    await new Promise(resolve => cdn.close(resolve));
+    await db?.end();
+    await control.query(`DROP DATABASE \`${database}\``);
+    await control.end();
+  });
+  const schema = (await fs.readFile(new URL('../../schema.sql', import.meta.url), 'utf8')).replace(/CREATE DATABASE IF NOT EXISTS portal_kolab;\s*USE portal_kolab;/, '');
+  await control.query(schema);
+  process.env.DB_NAME = database;
+  process.env.NODE_ENV = 'test';
+  process.env.JWT_SECRET = 'article-test-secret';
+  process.env.KROOMBOX_CDN_BASE_URL = `http://127.0.0.1:${cdn.address().port}`;
+  process.env.KROOMBOX_CDN_API_KEY = 'test';
+  process.env.KROOMBOX_CDN_JWT = '';
+  process.env.KROOMBOX_CDN_SYNC_ENABLED = 'false';
+  const app = (await import('../server.js')).default;
+  db = (await import('../lib/db.js')).default;
+  await (await import('../scripts/migrate.js')).migrate();
+  await db.execute("INSERT INTO admins (username,password) VALUES ('test-admin','unused')");
+  await db.execute("INSERT INTO students (nim,password,name) VALUES ('article-student','unused','Student')");
+  await db.execute("INSERT INTO article_tags (id,name,slug) VALUES ('tag1','One','one'),('tag2','Two','two')");
+  server = app.listen(0, '127.0.0.1');
+  await new Promise(resolve => server.once('listening', resolve));
+  const base = `http://127.0.0.1:${server.address().port}/api`;
+  const token = jwt.sign({ role: 'STUDENT', id: 'article-student' }, process.env.JWT_SECRET, { expiresIn: '5m' });
+  const action = async (type, data, expected = 200) => {
+    const response = await fetch(base + '/bridge', { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'manageArticle', type, id: 'article-test', data }) });
+    const result = await response.json();
+    assert.equal(response.status, expected, JSON.stringify(result));
+  };
+  const form = new FormData();
+  form.append('file', new Blob(['%PDF-test'], { type: 'application/pdf' }), 'guide.pdf');
+  form.append('featureType', 'ARTICLE_ATTACHMENT'); form.append('featureId', 'article-test'); form.append('visibility', 'public');
+  const response = await fetch(base + '/assets/upload', { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: form });
+  const upload = await response.json();
+  assert.equal(response.status, 200, JSON.stringify(upload));
+  assert.equal(uploads, 1);
+  const fileId = upload.asset.id;
+  const html = '<h2>Heading</h2><p><b>Bold</b> <i>Italic</i></p><h3>Subheading</h3><ul><li>Bullet</li></ul><ol><li>Number</li></ol>';
+  await action('add', { title: 'Article', date: '2026-09-23', content: html + '<script>alert(1)</script>', tags: ['tag1'], attachments: [{ fileId }] });
+  const read = async () => (await (await fetch(base + '/data/articles')).json()).find(a => a.id === 'article-test');
+  let article = await read();
+  assert.equal(article.content, html);
+  const [[stored]] = await db.execute('SELECT content FROM articles WHERE id=?', ['article-test']);
+  assert.equal(stored.content, html);
+  await action('edit', { content: '<p><br></p>' }, 400);
+  assert.equal((await read()).content, html, 'empty edit cannot erase the article');
+  assert.equal(article.tagList[0].id, 'tag1');
+  assert.equal(article.attachments[0].originalName, 'guide.pdf');
+  assert.equal(article.attachments[0].fileId, fileId);
+  const access = await fetch(base + `/assets/${fileId}/access`, { redirect: 'manual' });
+  assert.equal(access.status, 302, 'published attachments open without bearer headers');
+  await action('edit', { title: 'Updated', tags: ['tag2'], attachments: [{ fileId }] });
+  article = await read();
+  assert.deepEqual(article.tagList.map(tag => tag.id), ['tag2']);
+  assert.equal(article.attachments.length, 1);
+  await action('edit', { title: 'Invalid', tags: ['tag1'], attachments: [{ fileId: 'unknown' }] }, 400);
+  article = await read();
+  assert.equal(article.title, 'Updated', 'article update rolls back on invalid attachment');
+  assert.equal(article.tagList[0].id, 'tag2');
+  await action('edit', { title: 'Preserved' });
+  assert.equal((await read()).attachments.length, 1, 'omitted attachments are preserved');
+  await action('edit', { tags: [], attachments: [] });
+  article = await read();
+  assert.deepEqual(article.tagList, []); assert.deepEqual(article.attachments, []);
+  assert.equal((await fetch(base + `/assets/${fileId}/access`, { redirect: 'manual' })).status, 401, 'unlinked upload is not public');
+  await action('delete');
+  assert.equal(await read(), undefined);
+});

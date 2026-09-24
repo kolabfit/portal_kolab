@@ -1,0 +1,1629 @@
+Bertindaklah sebagai senior full-stack developer, backend engineer, dan cloud storage integration engineer.
+
+Pelajari terlebih dahulu seluruh source code Portal Ko+Lab terbaru sebelum melakukan perubahan.
+
+Project menggunakan:
+
+- Frontend: React + TypeScript + Vite
+- Backend: Node.js + Express
+- Database: MySQL
+- Authentication: JWT
+- Existing file system/storage:
+  - file_blobs
+  - /api/files
+  - repository upload
+  - avatar/photo
+  - article image
+  - article attachment
+  - URL asset di beberapa fitur
+- Existing audit log:
+  - system_logs
+
+Tujuan utama development ini adalah:
+
+Memigrasikan SELURUH fitur Portal Ko+Lab yang melakukan upload file agar file baru disimpan di Kroombox CDN, bukan lagi menyimpan binary file di MySQL atau menggunakan mekanisme upload lama.
+
+Gunakan Kroombox CDN API sesuai guide yang telah diberikan sebelumnya.
+
+Jangan melakukan rewrite besar terhadap aplikasi.
+
+Lakukan migration secara bertahap, backward-compatible, dan aman.
+
+1. SECURITY CREDENTIAL
+
+Credential Kroombox CDN tidak boleh ditulis di source code.
+
+Gunakan environment variable backend:
+
+KROOMBOX_CDN_BASE_URL=https://api-cdn.kroombox.com
+KROOMBOX_CDN_API_KEY=<SET_DI_BACKEND_ENV>
+KROOMBOX_CDN_JWT=<SET_DI_BACKEND_ENV>
+KROOMBOX_CDN_PROJECT_ID=<SET_DI_BACKEND_ENV>
+
+Jangan pernah expose:
+
+KROOMBOX_CDN_API_KEY
+KROOMBOX_CDN_JWT
+
+ke:
+
+Frontend React
+VITE_*
+localStorage
+API response
+console.log
+system_logs
+GitHub
+
+Frontend tidak boleh berkomunikasi langsung menggunakan API key CDN.
+
+Arsitektur wajib:
+
+Browser
+   ↓
+Portal Ko+Lab Backend
+   ↓
+Kroombox CDN API
+
+bukan:
+
+Browser
+   ↓
+Kroombox CDN menggunakan API key
+
+2. PERBAIKI .ENV SECURITY
+
+Repository sebelumnya mempunyai risiko .env ikut tracked.
+
+Pastikan:
+
+.env
+.env.*
+api/.env
+api/.env.*
+
+masuk .gitignore.
+
+Tetapi tetap pertahankan:
+
+.env.example
+
+tanpa secret.
+
+Contoh:
+
+KROOMBOX_CDN_BASE_URL=
+KROOMBOX_CDN_API_KEY=
+KROOMBOX_CDN_JWT=
+KROOMBOX_CDN_PROJECT_ID=
+
+Jika .env sebelumnya sudah tracked:
+
+git rm --cached api/.env
+
+atau equivalent yang aman.
+
+Jangan commit credential Kroombox.
+
+3. PELAJARI KROOMBOX CDN GUIDE
+
+Gunakan exact API contract dari guide Kroombox CDN yang sudah diberikan sebelumnya.
+
+Flow utama yang harus digunakan:
+
+Upload:
+POST /api/bridge/upload
+
+Autentikasi menggunakan mekanisme yang sesuai:
+
+x-api-key
+
+dan/atau:
+
+Authorization: Bearer <JWT>
+
+sesuai requirement endpoint.
+
+Upload prioritaskan:
+
+multipart/form-data
+
+field file sesuai guide Kroombox.
+
+Metadata dapat mencakup:
+
+fileName
+mimeType
+projectId
+parentId
+
+Gunakan exact nama field dari guide CDN apabila implementation sebenarnya berbeda.
+
+Jangan mengarang endpoint atau response field.
+
+4. ASYNCHRONOUS UPLOAD
+
+Kroombox CDN menggunakan proses upload asynchronous.
+
+Response upload dapat menghasilkan:
+
+fileId
+status
+processing
+status/tracking information
+
+Jangan langsung menganggap file siap digunakan ketika status:
+
+processing
+
+Backend Portal harus mempunyai mekanisme:
+
+upload
+↓
+menerima fileId
+↓
+cek status
+↓
+READY / SUCCESS
+↓
+simpan metadata
+
+Jika CDN mempunyai status endpoint dari response upload, gunakan endpoint tersebut.
+
+Jangan hardcode polling URL apabila response sudah menyediakannya.
+
+5. BUAT CDN SERVICE TERPUSAT
+
+Jangan menaruh request CDN di banyak route.
+
+Buat service seperti:
+
+api/services/kroomboxCdn.js
+
+atau:
+
+api/lib/kroomboxCdn.js
+
+Service minimum:
+
+uploadFile()
+getFile()
+getFileStatus()
+listFiles()
+getDeliveryUrl()
+deleteFile()
+moveFile()
+renameFile()
+createSignedUrl()
+purgeCache()
+
+Sesuaikan method dengan API Kroombox yang benar-benar tersedia.
+
+Semua fitur Portal harus menggunakan service ini.
+
+6. CLIENT HTTP
+
+Gunakan HTTP client backend existing jika tersedia.
+
+Contoh:
+
+axios
+
+Buat reusable CDN client.
+
+Contoh konseptual:
+
+const cdnClient = axios.create({
+  baseURL: process.env.KROOMBOX_CDN_BASE_URL,
+  timeout: 30000,
+  headers: {
+    'x-api-key': process.env.KROOMBOX_CDN_API_KEY
+  }
+});
+
+Jangan log Authorization atau API key.
+
+7. RETRY & TIMEOUT
+
+CDN request harus memiliki timeout.
+
+Contoh:
+
+Upload       60s
+Status       15s
+Metadata     15s
+Delete       15s
+
+Gunakan reasonable retry untuk:
+
+network timeout
+502
+503
+504
+
+Jangan retry:
+
+400
+401
+403
+413
+415
+
+secara membabi buta.
+
+8. DATABASE ASSET METADATA
+
+Portal Ko+Lab jangan lagi menyimpan binary file untuk upload baru.
+
+Buat tabel metadata terpusat jika belum ada.
+
+Contoh:
+
+cdn_assets
+----------
+id
+cdn_file_id
+owner_id
+owner_role
+
+feature_type
+feature_id
+
+original_name
+mime_type
+file_size
+
+cdn_delivery_url
+cdn_status
+
+parent_id
+is_private
+
+created_by
+created_at
+updated_at
+deleted_at
+
+Gunakan nama sesuai convention database project.
+
+cdn_file_id adalah identifier dari Kroombox CDN.
+
+Jangan menjadikan URL sebagai primary identifier.
+
+9. FEATURE TYPE
+
+Gunakan standardized asset context.
+
+Contoh:
+
+PROFILE_AVATAR
+PROFILE_ID_CARD
+
+REPOSITORY_FILE
+
+ARTICLE_THUMBNAIL
+ARTICLE_ATTACHMENT
+
+STARTUP_LOGO
+
+INFORMATION_ATTACHMENT
+EVENT_IMAGE
+EVENT_ATTACHMENT
+BROADCAST_ATTACHMENT
+SCHEDULE_ATTACHMENT
+
+INTERNSHIP_ATTACHMENT
+WORKLOAD_ATTACHMENT
+
+SYSTEM_LOGO
+SYSTEM_BACKGROUND
+OTHER
+
+Jangan membuat tabel storage baru untuk setiap fitur jika satu tabel metadata dapat mengelolanya.
+
+10. OWNER MODEL
+
+Asset harus mengetahui pemiliknya.
+
+Contoh:
+
+owner_id
+owner_role
+
+Role:
+
+STUDENT
+LECTURER
+ADMIN
+SYSTEM
+
+Untuk resource:
+
+feature_type
+feature_id
+
+Contoh:
+
+owner:
+607012400003
+STUDENT
+
+feature:
+ARTICLE_ATTACHMENT
+article-123
+
+11. STRUKTUR FOLDER / PARENT CDN
+
+Jika Kroombox CDN mendukung parentId, gunakan struktur logis.
+
+Contoh:
+
+portal-kolab/
+│
+├── users/
+│   ├── students/
+│   └── lecturers/
+│
+├── repo/
+│
+├── articles/
+│   ├── thumbnails/
+│   └── attachments/
+│
+├── startups/
+│
+├── events/
+│
+├── information/
+│
+├── broadcasts/
+│
+├── internships/
+│
+├── workloads/
+│
+└── system/
+
+Namun jangan mengandalkan nama folder sebagai security mechanism.
+
+Identifier asset tetap:
+
+cdn_file_id
+
+12. JANGAN SIMPAN BINARY BARU DI MYSQL
+
+Untuk upload baru:
+
+JANGAN gunakan:
+
+file_blobs.data
+LONGBLOB
+base64 database
+
+Binary disimpan:
+
+Kroombox CDN
+
+MySQL hanya menyimpan metadata.
+
+Existing file lama tetap harus bisa dibaca selama migration period.
+
+13. BACKWARD COMPATIBILITY
+
+Jangan langsung menghapus:
+
+file_blobs
+/api/files/:id
+
+karena asset existing masih menggunakan mekanisme lama.
+
+Gunakan strategy:
+
+OLD FILE
+→ serve dari legacy storage
+
+NEW FILE
+→ serve dari Kroombox CDN
+
+Tambahkan metadata seperti:
+
+storage_provider
+
+dengan:
+
+LEGACY
+KROOMBOX_CDN
+
+jika diperlukan.
+
+14. MIGRATION EXISTING FILE
+
+Buat migration script terpisah:
+
+api/scripts/migrate-files-to-kroombox-cdn.js
+
+Jangan migration binary dilakukan otomatis ketika server boot.
+
+Script melakukan:
+
+1. scan legacy file
+2. upload ke Kroombox CDN
+3. tunggu status sukses
+4. simpan cdn_file_id
+5. simpan delivery URL
+6. tandai migrated
+7. jangan hapus binary lama dulu
+
+Gunakan:
+
+dry-run
+
+mode.
+
+Contoh:
+
+npm run migrate:cdn -- --dry-run
+
+baru kemudian:
+
+npm run migrate:cdn
+
+15. MIGRATION HARUS RESUMABLE
+
+Migration file bisa besar.
+
+Jangan membuat satu transaction untuk seluruh file.
+
+Simpan status:
+
+PENDING
+PROCESSING
+MIGRATED
+FAILED
+
+Jika migration terhenti:
+
+resume
+
+dari asset yang belum selesai.
+
+Jangan upload ulang file yang sudah berhasil.
+
+16. CHECKSUM
+
+Jika memungkinkan, simpan:
+
+sha256
+
+atau checksum file.
+
+Gunakan untuk:
+
+duplicate detection
+migration verification
+integrity check
+
+Jangan menjadikannya satu-satunya security mechanism.
+
+17. FRONTEND UPLOAD FLOW
+
+Semua upload frontend harus berubah menjadi:
+
+User pilih file
+↓
+Frontend validation ringan
+↓
+POST Portal Backend
+↓
+Backend validation
+↓
+Backend upload ke Kroombox CDN
+↓
+Backend simpan metadata
+↓
+Return asset DTO
+↓
+Frontend tampilkan asset
+
+Frontend tidak membutuhkan API key CDN.
+
+18. BUAT PORTAL FILE API
+
+Buat route terpusat:
+
+api/routes/assets.js
+
+Contoh:
+
+POST   /api/assets/upload
+GET    /api/assets/:id
+DELETE /api/assets/:id
+POST   /api/assets/:id/sign
+
+Gunakan naming yang cocok dengan project.
+
+Route ini menjadi gateway Portal menuju Kroombox CDN.
+
+19. UPLOAD API
+
+Contoh request:
+
+POST /api/assets/upload
+multipart/form-data
+
+Field:
+
+file
+featureType
+featureId
+visibility
+
+Jangan menerima:
+
+ownerId
+ownerRole
+
+secara bebas dari frontend.
+
+Owner harus ditentukan backend dari:
+
+req.user
+
+kecuali ADMIN workflow memang membutuhkan target user.
+
+20. VALIDASI FILE TERPUSAT
+
+Buat validation config.
+
+Contoh:
+
+PROFILE_AVATAR
+image/jpeg
+image/png
+image/webp
+max 5 MB
+
+ARTICLE_THUMBNAIL
+image/jpeg
+image/png
+image/webp
+max 5 MB
+
+ARTICLE_ATTACHMENT
+pdf
+docx
+xlsx
+pptx
+txt
+csv
+zip
+max 10 MB
+
+REPOSITORY_FILE
+sesuai existing policy
+
+Jangan menggunakan satu allowlist untuk semua feature.
+
+21. SECURITY FILE
+
+Backend wajib:
+
+validate MIME
+validate extension
+validate size
+sanitize filename
+reject path traversal
+reject executable
+
+Jangan hanya menggunakan:
+
+accept=""
+
+frontend.
+
+Reject minimal:
+
+.exe
+.bat
+.cmd
+.com
+.scr
+.msi
+.ps1
+.vbs
+
+dan file executable berbahaya lain.
+
+22. AVATAR / PROFILE IMAGE
+
+Migrasikan:
+
+Student avatar
+Lecturer avatar
+Admin avatar jika ada
+
+ke Kroombox CDN.
+
+Database jangan menyimpan binary.
+
+Boleh simpan:
+
+avatar_asset_id
+
+dan/atau:
+
+avatar_url
+
+tetapi asset ID harus menjadi reference utama.
+
+23. PHOTO ID / KTM
+
+Migrasikan:
+
+photo_id
+ID Card
+KTM
+
+ke CDN.
+
+Karena data ini lebih sensitif, gunakan asset private jika Kroombox mendukung.
+
+Gunakan:
+
+Signed URL
+
+dengan expiration.
+
+Jangan gunakan permanent public delivery URL untuk ID card jika tidak diperlukan.
+
+24. MAINFRAME REPO
+
+Repository file sekarang kemungkinan menggunakan:
+
+file_blobs
+repo
+
+Migrasikan upload binary ke CDN.
+
+Table repo tetap menyimpan:
+
+folder hierarchy
+owner
+category
+file metadata
+quota
+
+Tetapi binary berada di CDN.
+
+Tambahkan:
+
+cdn_asset_id
+cdn_file_id
+
+pada repo file record atau relation ke cdn_assets.
+
+25. REPO DOWNLOAD
+
+Download repo menjadi:
+
+Portal permission check
+↓
+Generate CDN signed URL jika private
+↓
+Return/redirect
+
+Jangan memberikan private file CDN URL tanpa permission check.
+
+26. ARTICLE THUMBNAIL
+
+Migrasikan:
+
+Article thumbnail
+
+ke Kroombox CDN.
+
+Current field seperti:
+
+image_url
+
+boleh dipertahankan untuk backward compatibility.
+
+Tambahkan relation:
+
+thumbnail_asset_id
+
+jika diperlukan.
+
+Upload:
+
+ARTICLE_THUMBNAIL
+
+27. ARTICLE ATTACHMENT
+
+Migrasikan semua:
+
+article_attachments
+
+agar file benar-benar upload ke Kroombox CDN.
+
+Database attachment menyimpan:
+
+article_id
+asset_id
+original_name
+mime_type
+file_size
+
+Bukan binary.
+
+28. ARTICLE EDIT
+
+Saat article diedit:
+
+existing attachments tetap ada
+new attachment upload ke CDN
+removed attachment relation dihapus
+
+Jangan langsung delete CDN file jika asset mungkin masih direferensikan resource lain.
+
+Jika unique ownership terjamin:
+
+boleh delete CDN setelah confirmation.
+
+29. STARTUP LOGO
+
+Migrasikan:
+
+startup logo
+
+ke CDN.
+
+Startup menyimpan reference:
+
+logo_asset_id
+
+atau metadata equivalent.
+
+Jika logo belum ada:
+
+gunakan fallback visual.
+
+30. INFORMATION
+
+Audit fitur:
+
+Informasi
+
+Jika memiliki:
+
+thumbnail
+attachment
+image
+document
+
+migrasikan semuanya ke Kroombox CDN.
+
+Jika fitur belum memiliki upload, jangan menambah file upload tanpa requirement.
+
+31. EVENTS
+
+Audit:
+
+Events
+
+Migrasikan:
+
+poster
+thumbnail
+banner
+attachment
+
+ke CDN jika field tersebut memang tersedia.
+
+32. BROADCAST
+
+Audit:
+
+Broadcast
+
+Jika ada:
+
+image
+attachment
+file
+
+migrasikan ke CDN.
+
+33. SCHEDULE
+
+Jika Schedule memiliki attachment:
+
+migrasikan.
+
+Jika tidak:
+
+jangan menambah fitur baru.
+
+34. MAGANG
+
+Jika Kelola Magang sekarang atau nanti mempunyai:
+
+surat
+proposal
+laporan
+dokumen
+attachment
+
+gunakan:
+
+INTERNSHIP_ATTACHMENT
+
+Kroombox CDN.
+
+35. WORKLOAD
+
+Jika Workload mempunyai:
+
+proposal
+laporan
+dokumen project
+evidence
+attachment
+
+gunakan:
+
+WORKLOAD_ATTACHMENT
+
+36. SYSTEM ASSET
+
+Migrasikan asset upload dari Admin/System:
+
+Portal logo
+background
+banner
+
+jika saat ini dapat diupload.
+
+Jangan menyentuh static source asset yang memang bagian dari bundle frontend kecuali ada alasan.
+
+37. DELIVERY URL
+
+Gunakan endpoint Kroombox:
+
+GET /api/bridge/view/:id
+
+sesuai guide.
+
+Jangan construct delivery URL sendiri jika CDN menyediakan URL dari response.
+
+Simpan:
+
+cdn_file_id
+
+dan optionally cached delivery URL.
+
+38. IMAGE TRANSFORMATION
+
+Untuk image display:
+
+gunakan transform CDN bila tersedia.
+
+Contoh use case:
+
+avatar 128x128
+thumbnail article
+startup logo
+event card
+
+Gunakan query transform resmi CDN:
+
+width
+height
+quality
+format
+fit
+
+sesuai guide Kroombox.
+
+Jangan melakukan resize image berat di backend Portal jika CDN sudah menyediakan transformation.
+
+39. SIGNED URL
+
+Untuk asset private:
+
+ID card
+private repo file
+internal document
+internship sensitive document
+
+gunakan Kroombox Signed URL.
+
+Portal flow:
+
+GET /api/assets/:id/access
+↓
+check authorization
+↓
+backend request signed URL CDN
+↓
+return short-lived URL
+
+Expiration reasonable:
+
+5–15 menit
+
+atau sesuai requirement.
+
+40. PUBLIC VS PRIVATE
+
+Buat classification.
+
+Public:
+
+avatar jika memang public
+startup logo
+article thumbnail
+public article attachment jika intended
+event poster
+
+Private:
+
+KTM
+ID Card
+private repository
+internal document
+private workload document
+private internship document
+
+Jangan membuat semua file public.
+
+41. DELETE FILE
+
+Ketika file dihapus di Portal:
+
+check permission
+↓
+mark deleted DB
+↓
+delete CDN asset
+↓
+audit
+
+Jika CDN delete gagal:
+
+jangan membuat metadata hilang tanpa trace.
+
+Gunakan:
+
+DELETE_PENDING
+
+jika diperlukan.
+
+42. RENAME FILE
+
+Jika user rename repository file:
+
+gunakan Kroombox rename API bila dibutuhkan.
+
+Tetapi jangan menganggap rename menghasilkan file ID baru.
+
+Gunakan immutable:
+
+cdn_file_id
+
+seperti guide.
+
+43. MOVE FILE
+
+Folder movement repository dapat menggunakan:
+
+move CDN asset
+
+jika Kroombox folder structure memang digunakan.
+
+Namun Portal repo hierarchy tetap menjadi source of truth utama jika lebih aman.
+
+Jangan membuat portal rusak hanya karena folder CDN berbeda.
+
+44. PURGE CACHE
+
+Jika asset diganti namun menggunakan URL/ID yang sama dan Kroombox mendukung:
+
+Purge Asset Cache
+
+gunakan setelah update.
+
+Contoh:
+
+avatar replacement
+startup logo replacement
+thumbnail replacement
+
+Gunakan hanya jika diperlukan.
+
+45. CDN STATUS
+
+Tambahkan internal Admin diagnostic bila sederhana:
+
+Kroombox CDN
+Connected / Error
+
+Check menggunakan endpoint health/descriptor yang tersedia pada guide.
+
+Jangan tampilkan API key/token.
+
+46. FALLBACK
+
+Jika CDN down:
+
+Upload harus gagal dengan pesan:
+
+Penyimpanan file sementara tidak tersedia.
+Silakan coba kembali.
+
+Jangan fallback diam-diam ke MySQL LONGBLOB untuk upload baru.
+
+Hal tersebut akan menghasilkan mixed architecture tidak terkontrol.
+
+47. FRONTEND ERROR
+
+Gunakan message:
+
+File gagal diunggah.
+
+Dengan detail aman:
+
+Ukuran file melebihi batas.
+Format tidak didukung.
+CDN sedang tidak tersedia.
+
+Jangan tampilkan raw CDN stack trace/token.
+
+48. UPLOAD PROGRESS
+
+Jika mudah dilakukan:
+
+tampilkan:
+
+Uploading
+Processing
+Ready
+
+karena Kroombox asynchronous.
+
+Contoh:
+
+proposal.pdf
+
+Uploading...
+Processing CDN...
+Ready
+
+49. ASSET DTO
+
+Frontend menerima DTO Portal.
+
+Contoh:
+
+{
+  "id": "asset-xxx",
+  "fileId": "cdn-file-id",
+  "name": "proposal.pdf",
+  "mimeType": "application/pdf",
+  "size": 1234567,
+  "status": "READY",
+  "url": "/api/assets/asset-xxx/access"
+}
+
+Jangan response:
+
+cdn api key
+cdn jwt
+internal secret
+
+50. AUDIT LOG
+
+Catat:
+
+uploadCdnAsset
+deleteCdnAsset
+renameCdnAsset
+moveCdnAsset
+migrateCdnAsset
+replaceCdnAsset
+
+Metadata:
+
+{
+  "assetId": "...",
+  "cdnFileId": "...",
+  "featureType": "ARTICLE_ATTACHMENT"
+}
+
+Jangan log JWT/API key.
+
+51. QUOTA
+
+Existing repository mempunyai quota.
+
+Quota tetap dihitung dari:
+
+cdn_assets.file_size
+
+bukan ukuran MySQL blob.
+
+Pastikan:
+
+repository quota
+user quota
+max upload
+
+tetap berfungsi.
+
+52. DATABASE LEGACY FILE_BLOBS
+
+Jangan langsung DROP:
+
+file_blobs
+
+Tahap migration:
+
+PHASE 1
+New upload → CDN
+
+PHASE 2
+Legacy migration
+
+PHASE 3
+Verification
+
+PHASE 4
+Stop legacy read
+
+PHASE 5
+optional cleanup
+
+Drop hanya setelah seluruh legacy file diverifikasi.
+
+53. MIGRATION VERIFICATION
+
+Migration dianggap berhasil jika:
+
+jumlah source file
+=
+jumlah migrated + failed
+
+Untuk migrated file:
+
+cdn_file_id ada
+status READY
+delivery/access berhasil
+size sesuai
+checksum sesuai jika tersedia
+
+54. MIGRATION REPORT
+
+Buat output:
+
+KROOMBOX CDN MIGRATION
+
+Total Legacy Files : 1200
+Migrated           : 1180
+Failed             : 20
+Skipped            : 0
+
+Dan error report:
+
+legacyId
+feature
+filename
+reason
+
+55. DRY RUN
+
+Migration script WAJIB support dry run.
+
+Dry run:
+
+scan database
+map feature
+validate file
+estimate migration
+
+tanpa upload.
+
+56. TEST CDN SERVICE
+
+Tambahkan unit/integration tests menggunakan mock server.
+
+Jangan menggunakan production API Kroombox dalam automated test biasa.
+
+Test:
+
+upload success
+upload processing
+status ready
+upload error
+401
+403
+413
+timeout
+delete
+signed url
+
+57. TEST ASSET API
+
+Tambahkan:
+
+1. Student dapat upload avatar sendiri.
+2. Student tidak dapat upload avatar user lain.
+3. Admin dapat mengelola system asset.
+4. Private repo file tidak dapat diakses user lain.
+5. Invalid extension ditolak.
+6. Oversized file ditolak.
+7. CDN failure tidak membuat broken DB row.
+8. Delete asset melakukan permission check.
+
+58. TEST ARTICLE
+
+9. Thumbnail article upload CDN.
+10. Attachment article upload CDN.
+11. Article tanpa thumbnail tetap valid.
+12. Article tanpa attachment tetap valid.
+13. Delete attachment tidak menghapus article.
+14. Edit thumbnail bekerja.
+
+59. TEST REPOSITORY
+
+15. Upload repo menghasilkan CDN asset.
+16. Quota dihitung.
+17. Download private file menggunakan authorized access.
+18. Unauthorized user → 403.
+19. Rename tetap menjaga file ID.
+20. Delete repo menghapus/menandai CDN asset.
+
+60. TEST LEGACY
+
+21. Legacy file masih dapat diakses.
+22. Migrated legacy menggunakan CDN.
+23. Failed migration tidak kehilangan source binary.
+24. Migration resume bekerja.
+25. Migration tidak duplicate file yang sudah migrated.
+
+61. REMOVE BASE64 FILE FLOW
+
+Setelah CDN integration berhasil, audit semua:
+
+FileReader.readAsDataURL
+base64 upload
+Buffer from JSON
+
+Jika digunakan untuk binary upload:
+
+migrasikan ke:
+
+multipart/form-data
+
+Preview image frontend masih boleh menggunakan:
+
+URL.createObjectURL(file)
+
+tanpa mengirim base64.
+
+62. MEMORY
+
+Jangan load file besar seluruhnya ke memory jika bisa stream.
+
+Untuk backend upload ke CDN:
+
+prefer:
+
+stream
+multipart
+
+sesuai capabilities HTTP client/CDN.
+
+Hindari:
+
+75 MB JSON base64
+
+63. EXPRESS BODY LIMIT
+
+Setelah file upload menggunakan multipart:
+
+review:
+
+express.json({ limit: '75mb' })
+
+Jangan mempertahankan limit sangat besar hanya karena legacy base64 upload jika tidak lagi dibutuhkan.
+
+Turunkan secara aman setelah memastikan endpoint lain tidak membutuhkan.
+
+64. CDN API ADAPTER
+
+Portal tidak boleh tergantung langsung pada response Kroombox di seluruh source code.
+
+Gunakan adapter:
+
+Kroombox response
+↓
+normalize
+↓
+Portal Asset DTO
+
+Sehingga jika Kroombox API berubah:
+
+hanya service CDN yang diperbarui.
+
+65. CONFIGURATION
+
+Buat:
+
+api/config/storage.js
+
+misalnya:
+
+STORAGE_PROVIDER=KROOMBOX_CDN
+
+Tetapi jangan membuat runtime switch ke insecure storage sebagai silent fallback.
+
+Boleh digunakan untuk migration/testing.
+
+66. HEALTH CHECK
+
+Update:
+
+/api/health
+
+jika sesuai.
+
+Jangan membuat seluruh API health DOWN hanya karena CDN unavailable jika database/backend masih hidup.
+
+Gunakan component status:
+
+{
+  "api": "ok",
+  "database": "ok",
+  "cdn": "ok"
+}
+
+jika architecture mendukung.
+
+67. DOCUMENTATION
+
+Tambahkan:
+
+docs/KROOMBOX-CDN-INTEGRATION.md
+
+Isi:
+
+Architecture
+Environment variables
+Upload flow
+Private/public files
+Signed URL
+Migration
+Troubleshooting
+Security
+
+Jangan mencantumkan real API key/JWT.
+
+68. ENV EXAMPLE
+
+Update .env.example:
+
+KROOMBOX_CDN_BASE_URL=https://api-cdn.kroombox.com
+KROOMBOX_CDN_API_KEY=
+KROOMBOX_CDN_JWT=
+KROOMBOX_CDN_PROJECT_ID=
+
+69. NO SECRET IN FRONTEND
+
+Audit:
+
+VITE_
+
+Pastikan tidak ada:
+
+VITE_KROOMBOX_API_KEY
+VITE_KROOMBOX_JWT
+
+Jika ditemukan:
+
+hapus.
+
+70. BUILD
+
+Setelah implementation:
+
+npm run build
+
+harus sukses.
+
+Backend:
+
+npm test
+
+harus sukses.
+
+Migration dry-run harus berhasil.
+
+71. MANUAL TEST
+
+Test manual:
+
+Student avatar
+Student ID card
+Lecturer avatar
+Repository upload
+Repository download
+
+Article thumbnail
+Article attachment
+
+Startup logo
+
+Event image jika ada
+Informasi attachment jika ada
+Broadcast attachment jika ada
+
+Private signed URL
+
+Delete file
+Rename file
+
+72. JANGAN MERUSAK FITUR EXISTING
+
+Pastikan tetap bekerja:
+
+Login
+Session
+Management User
+Startup
+Magang
+Workload
+
+Student Status Saya
+Lecturer portal
+
+Article
+Repo
+Information
+Schedule
+Events
+Broadcast
+Streaming
+
+73. IMPLEMENTATION PHASE
+
+Kerjakan dalam urutan:
+
+PHASE 1
+Audit seluruh file upload
+
+PHASE 2
+Kroombox CDN service
+
+PHASE 3
+cdn_assets metadata
+
+PHASE 4
+Portal Asset API
+
+PHASE 5
+Repository migration
+
+PHASE 6
+Profile/avatar/ID
+
+PHASE 7
+Article media
+
+PHASE 8
+Other features
+
+PHASE 9
+Legacy migration script
+
+PHASE 10
+Test/security cleanup
+
+Jangan mengubah seluruh aplikasi sekaligus tanpa verification per phase.
+
+74. ACCEPTANCE CRITERIA
+
+Implementasi dianggap selesai jika:
+
+✓ Semua upload BARU menggunakan Kroombox CDN
+
+✓ Tidak ada credential CDN di frontend
+✓ Tidak ada credential CDN di repository
+
+✓ CDN service terpusat
+✓ Asset metadata tersimpan MySQL
+✓ Binary baru tidak tersimpan di MySQL
+
+PROFILE
+✓ Avatar CDN
+✓ Photo ID private CDN
+
+REPOSITORY
+✓ File CDN
+✓ Quota tetap bekerja
+✓ Private access tetap aman
+
+ARTICLE
+✓ Thumbnail CDN
+✓ Attachment CDN
+
+OTHER FEATURES
+✓ Semua fitur existing yang mempunyai upload telah diaudit dan dimigrasikan
+
+PRIVATE FILE
+✓ Signed URL
+✓ Authorization Portal
+
+LEGACY
+✓ File lama tetap dapat dibaca
+✓ Migration script tersedia
+✓ Dry-run tersedia
+✓ Resume tersedia
+✓ Source tidak dihapus sebelum verified
+
+SECURITY
+✓ MIME validation
+✓ Size validation
+✓ extension validation
+✓ API key backend-only
+✓ JWT CDN backend-only
+✓ audit log tidak mengandung secret
+
+QUALITY
+✓ Backend tests pass
+✓ Frontend build pass
+✓ Migration verification pass
+
+75. IMPLEMENTATION REPORT
+
+Setelah seluruh pekerjaan selesai berikan:
+
+KROOMBOX CDN MIGRATION SUMMARY
+
+1. Existing File Upload Audit
+2. Legacy Storage Found
+3. Kroombox CDN API Integration
+4. Environment Variables
+5. CDN Service
+6. Asset Metadata Schema
+7. Portal Asset API
+8. Authentication & Authorization
+9. Avatar Migration
+10. Photo ID Migration
+11. Repository Migration
+12. Article Thumbnail Migration
+13. Article Attachment Migration
+14. Startup Asset Migration
+15. Other Feature Migration
+16. Private File / Signed URL
+17. Image Transformation
+18. Cache Purge
+19. Legacy Migration Script
+20. Migration Dry Run
+21. Migration Result
+22. File Validation & Security
+23. Audit Logging
+24. Files Added
+25. Files Modified
+26. Tests Added
+27. Test Results
+28. Frontend Build
+29. Remaining Legacy Dependencies
+30. Known Limitations
+
+Jangan hanya memberikan rekomendasi atau contoh kode.
+
+Implementasikan migrasi secara end-to-end pada source code Portal Ko+Lab.
+
+Jangan menaruh API key/JWT asli di source code, documentation, test fixture, commit, atau output implementation report.
+
+Sebelum menjalankan prompt ini, gunakan credential Kroombox CDN baru yang disimpan hanya di environment backend dan jangan memasukkan credential ke source code.

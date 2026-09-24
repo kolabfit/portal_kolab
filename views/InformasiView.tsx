@@ -1,4 +1,4 @@
-
+﻿
 import React, { useState, useMemo } from 'react';
 import { 
   Info, Plus, Search, Trash2, Edit2, X, Save, 
@@ -11,6 +11,8 @@ import { api } from '../api';
 interface InformasiViewProps {
   list: Informasi[];
   isAdmin: boolean;
+  userRole: UserRole;
+  userStartupId?: string | null;
   currentUser: string;
   startups: StartupTeam[];
   onRefresh?: () => void;
@@ -21,6 +23,8 @@ interface InformasiViewProps {
 const InformasiView: React.FC<InformasiViewProps> = ({ 
   list, 
   isAdmin, 
+  userRole,
+  userStartupId,
   currentUser,
   startups, 
   onRefresh, 
@@ -42,12 +46,27 @@ const InformasiView: React.FC<InformasiViewProps> = ({
     setTimeout(() => setIsSyncing(false), 600);
   };
 
-  const filtered = useMemo(() => {
-    return (Array.isArray(list) ? list : []).filter(i => 
+      const filtered = useMemo(() => {
+    let baseList = Array.isArray(list) ? list : [];
+    if (!isAdmin) {
+      if (userRole === UserRole.STUDENT) {
+         baseList = baseList.filter(i => {
+           if (['ALL', 'ROLE_STUDENT', 'STARTUP_ALL'].includes(i.targetType)) return true;
+           if (i.targetType === 'STARTUP_SPECIFIC') {
+             return i.targetValue === userStartupId;
+           }
+           return false;
+         });
+      } else if (userRole === UserRole.LECTURER) {
+         baseList = baseList.filter(i => ['ALL', 'ROLE_LECTURER'].includes(i.targetType));
+      }
+    }
+    
+    return baseList.filter(i => 
       i.title.toLowerCase().includes(search.toLowerCase()) || 
       i.description.toLowerCase().includes(search.toLowerCase())
     ).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-  }, [list, search]);
+  }, [list, search, isAdmin, userRole, userStartupId]);
 
   const handleDelete = (id: string, title: string) => {
     showConfirm('Hapus Informasi?', `Hapus "${title}"?`, async () => {
@@ -224,3 +243,5 @@ const InformasiView: React.FC<InformasiViewProps> = ({
 };
 
 export default InformasiView;
+
+

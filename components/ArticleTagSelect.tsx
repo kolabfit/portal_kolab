@@ -21,7 +21,11 @@ export function ArticleTagSelect({ tags, selectedIds, onChange, maxTags = 5 }: A
   const containerRef = useRef<HTMLDivElement>(null);
 
   const activeTags = tags.filter(t => t.is_active !== false);
-  const selectedTags = activeTags.filter(t => selectedIds.includes(t.id));
+  const selectedTags = selectedIds.map(id => {
+    const existing = activeTags.find(t => t.id === id);
+    if (existing) return existing;
+    return { id, name: id, slug: id };
+  });
   
   const filteredTags = activeTags.filter(t => 
     t.name.toLowerCase().includes(query.toLowerCase()) && !selectedIds.includes(t.id)
@@ -95,8 +99,7 @@ export function ArticleTagSelect({ tags, selectedIds, onChange, maxTags = 5 }: A
       {/* Dropdown */}
       {isOpen && query && (
         <div className="absolute z-10 w-full mt-1 bg-white border border-slate-100 rounded-xl shadow-lg max-h-48 overflow-y-auto">
-          {filteredTags.length > 0 ? (
-            <ul className="py-1">
+          <ul className="py-1">
               {filteredTags.map(tag => (
                 <li key={tag.id}>
                   <button
@@ -108,12 +111,18 @@ export function ArticleTagSelect({ tags, selectedIds, onChange, maxTags = 5 }: A
                   </button>
                 </li>
               ))}
+              {!filteredTags.find(t => t.name.toLowerCase() === query.trim().toLowerCase()) && query.trim() && (
+                <li>
+                  <button
+                    type="button"
+                    className="w-full text-left px-4 py-2 text-sm text-orange-600 hover:bg-orange-50 font-bold transition-colors border-t border-slate-100"
+                    onClick={() => handleSelect(query.trim())}
+                  >
+                    + Tambah tag "{query.trim()}"
+                  </button>
+                </li>
+              )}
             </ul>
-          ) : (
-            <div className="px-4 py-3 text-sm text-slate-500 text-center">
-              Tag tidak ditemukan
-            </div>
-          )}
         </div>
       )}
     </div>

@@ -1,4 +1,4 @@
-
+﻿
 import React, { useState, useEffect } from 'react';
 import { UserRole, UserProfile, Announcement, AppAssets, StartupTeam, Schedule, Event, Article, ArticleCategory, LecturerOverview, LecturerStudentSummary } from './types';
 import { api } from './api';
@@ -61,6 +61,24 @@ const App: React.FC = () => {
       return false;
     }
     await loadBaseData();
+    return true;
+  };
+
+  const refreshArticles = async () => {
+    const [list, categoryList, tagList] = await Promise.all([
+      api.getData('getArticles'), api.getData('getCategories'), api.getData('getTags')
+    ]);
+    if (Array.isArray(list)) setArticles(list);
+    if (Array.isArray(categoryList)) setCategories(categoryList);
+    if (Array.isArray(tagList)) setTags(tagList);
+  };
+
+  const saveArticle = async (type: 'add' | 'edit', id: string | undefined, data: any) => {
+    const result = await api.postData('manageArticle', { type, id, data });
+    if (result?.status !== 'success' || result.id !== id) {
+      showAlert('Gagal menyimpan', result?.message || 'Artikel belum tersimpan.', 'error');
+      return false;
+    }
     return true;
   };
 
@@ -243,11 +261,11 @@ const App: React.FC = () => {
           {activeTab === 'profile' && <ProfileView profile={profile} setProfile={setProfile} startups={startups} handleProfileUpdate={async e => { e.preventDefault(); setIsLoading(true); const { startupPosition, startupId, studentType, ...editableProfile } = profile; const result = await api.postData('updateProfile', editableProfile); setIsLoading(false); if (result?.status === 'success') { setProfile(await api.restoreSession()); showAlert('Profile Synced', 'Changes committed.', 'success'); } else showAlert('Gagal menyimpan', result?.message || 'Profil belum tersimpan.', 'error'); }} onFileUpload={handleFileUpload} />}
           {activeTab === 'repo' && <RepoView profile={profile} onShowAlert={showAlert} isAdmin={isAdmin} assets={assets} showConfirm={showConfirm} />}
           {activeTab === 'streaming' && <StreamingView profile={profile} assets={assets} setProfile={setProfile} onShowAlert={showAlert} onRefresh={loadBaseData} showConfirm={showConfirm} />}
-          {activeTab === 'informasi' && <InformasiView list={informasiList} isAdmin={isAdmin} currentUser={profile.name} startups={startups} onRefresh={loadBaseData} onShowAlert={showAlert} showConfirm={showConfirm} />}
+          {activeTab === 'informasi' && <InformasiView list={informasiList} isAdmin={isAdmin} currentUser={profile.name} userRole={profile.role} userStartupId={profile.startupId} startups={startups} onRefresh={loadBaseData} onShowAlert={showAlert} showConfirm={showConfirm} />}
           {activeTab === 'schedule' && <ScheduleView meetings={schedules} isAdmin={isAdmin} currentUser={profile.name} onRefresh={loadBaseData} onCreate={d => saveAndRefresh('manageSchedule', { type: 'add', data: d })} onEdit={(id, d) => saveAndRefresh('manageSchedule', { type: 'edit', id, data: d })} onDelete={id => showConfirm('Purge Entry', 'Hapus permanent dari mainframe?', () => saveAndRefresh('manageSchedule', { type: 'delete', id }))} />}
           {activeTab === 'events' && <EventsView events={events} isAdmin={isAdmin} currentUser={profile.name} userEmail={profile.email} onRefresh={loadBaseData} onShowAlert={showAlert} showConfirm={showConfirm} />}
-          {activeTab === 'article' && <ArticleView articles={articles} categories={categories} tags={tags} isAdmin={isAdmin} currentUser={profile.name} onAction={(t, id, d) => { if(t === 'delete') { showConfirm('Purge Article', 'Hapus artikel dari hub?', () => saveAndRefresh('manageArticle', { type: t, id, data: d })); } else { return saveAndRefresh('manageArticle', { type: t, id, data: d }); } }} onRefresh={loadBaseData} showConfirm={showConfirm} />}
-          {activeTab === 'announcements' && <AnnouncementsView announcements={announcements} startups={startups} currentUser={profile.name} isAdmin={isAdmin} onRefresh={loadBaseData} showConfirm={showConfirm} />}
+          {activeTab === 'article' && <ArticleView articles={articles} categories={categories} tags={tags} isAdmin={isAdmin} currentUser={profile.name} onAction={(t, id, d) => { if(t === 'delete') { showConfirm('Purge Article', 'Hapus artikel dari hub?', () => saveAndRefresh('manageArticle', { type: t, id, data: d })); } else { return saveArticle(t, id, d); } }} onRefresh={refreshArticles} showConfirm={showConfirm} />}
+          {activeTab === 'announcements' && <AnnouncementsView announcements={announcements} startups={startups} currentUser={profile.name} isAdmin={isAdmin} userRole={profile.role} userStartupId={profile.startupId} onRefresh={loadBaseData} showConfirm={showConfirm} onShowAlert={showAlert} />}
           {activeTab === 'members' && isAdmin && <MemberManagementView userRole={profile.role} startups={startups} onRefresh={loadBaseData} onShowAlert={showAlert} showConfirm={showConfirm} />}
           {activeTab === 'article-taxonomy' && isAdmin && <ContentManagementView onShowAlert={showAlert} />}
           {activeTab === 'settings' && <SettingsView assets={assets} setAssets={setAssets} onAssetUpload={handleFileUpload} onSaveAssets={async () => { if (await saveAndRefresh('updateAssets', { data: assets })) showAlert('Global Engine Synced', 'New assets deployed.', 'success'); }} />}
@@ -263,3 +281,9 @@ const App: React.FC = () => {
 };
 
 export default App;
+
+
+
+
+
+

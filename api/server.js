@@ -1,4 +1,4 @@
-import express from 'express';
+﻿import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import morgan from 'morgan';
@@ -21,6 +21,7 @@ import internshipTransferRoutes from './routes/internshipTransfer.js';
 import workloadRoutes from './routes/workloads.js';
 import studentStatusRoutes from './routes/studentStatus.js';
 import lecturerRoutes from './routes/lecturer.js';
+import assetRoutes from './routes/assets.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -54,6 +55,7 @@ app.use('/api/admin/internships', internshipTransferRoutes);
 app.use('/api/workloads', workloadRoutes);
 app.use('/api/student', studentStatusRoutes);
 app.use('/api/lecturer', lecturerRoutes);
+app.use('/api/assets', assetRoutes);
 
 app.get('/', (req, res) => {
   res.send('Portal Kolab API is running');
@@ -71,3 +73,4 @@ if (process.env.NODE_ENV !== 'test') app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
   console.log(`Swagger docs available at https://api-portal.kolab.top/api-docs`);
 });
+

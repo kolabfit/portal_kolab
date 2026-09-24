@@ -22,3 +22,13 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Environment variables
+.env
+.env.*
+api/.env
+api/.env.*
+!.env.example
+!api/.env.example
+test-results/
+playwright-report/

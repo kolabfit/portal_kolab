@@ -115,7 +115,8 @@ test('edit form displays current position, resets when moved, clears NON_STARTUP
 test('startup cluster groups member names in explicit leadership order', () => {
   const app = directory(fixtures);
   let tree = app.render(); nodes(tree).find(n => n.type === 'button' && label(n) === 'Startup Cluster').props.onClick();
-  tree = app.render(); const team = nodes(tree).find(n => n.type === 'details');
+  tree = app.render(); nodes(tree).find(n => n.type === 'button' && label(n).includes('Lihat Struktur Tim')).props.onClick();
+  tree = app.render(); const team = nodes(tree).find(n => n.type === 'div' && String(n.props.className).includes('fixed inset-0 z-[150]'));
   assert.deepEqual(nodes(team).filter(n => n.type === 'h5').map(label), ['CEO', 'COO', 'CTO', 'CFO', 'CMO', 'Anggota']);
   const sections = nodes(team).filter(n => n.type === 'section');
   assert.match(textContent(sections[0]), /Alya/); assert.match(textContent(sections[2]), /Faisal/); assert.doesNotMatch(textContent(team), /Andi/);

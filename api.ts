@@ -1,4 +1,4 @@
-import type { StudentMemberOverview } from './types';
+﻿import type { StudentMemberOverview } from './types';
 /**
  * PORTAL KOLAB API GATEWAY
  * Version: 3.0.0 - Node.js & MySQL Implementation
@@ -66,6 +66,7 @@ export const api = {
       const url = `${API_BASE_URL}${endpoint}?t=${Date.now()}`;
       
       const response = await fetch(url, {
+        signal: AbortSignal.timeout(15000),
         method: 'GET',
         headers: this.getToken() ? { Authorization: 'Bearer ' + this.getToken() } : {}
       });
@@ -119,7 +120,8 @@ export const api = {
           'Content-Type': 'application/json',
           ...(this.getToken() ? { Authorization: 'Bearer ' + this.getToken() } : {}),
         },
-        body: JSON.stringify({ action, ...payload })
+        body: JSON.stringify({ action, ...payload }),
+        ...(['manageArticle', 'articleAction'].includes(action) ? { signal: AbortSignal.timeout(30000) } : {})
       });
       
       if (!response.ok) {
@@ -218,13 +220,65 @@ export const api = {
   },
 
   /**
-   * Helper khusus untuk upload biner profile (avatar/KTM)
+  /**
+   * Upload file via Portal Backend -> Kroombox CDN (multipart/form-data).
+   * No API key is exposed to the frontend.
+   * @param file - File object from input[type=file]
+   * @param featureType - e.g. 'PROFILE_AVATAR', 'ARTICLE_THUMBNAIL', 'REPOSITORY_FILE'
+   * @param featureId - Optional ID of the parent resource
+   * @param visibility - 'public' | 'private'
    */
+  async uploadFileCdn(
+    file: File,
+    featureType: string = 'OTHER',
+    featureId?: string,
+    visibility: 'public' | 'private' = 'public'
+  ) {
+    try {
+      const form = new FormData();
+      form.append('file', file);
+      form.append('featureType', featureType);
+      if (featureId) form.append('featureId', featureId);
+      form.append('visibility', visibility);
+      const response = await fetch(`${API_BASE_URL}/assets/upload`, {
+        method: 'POST',
+        headers: this.getToken() ? { Authorization: 'Bearer ' + this.getToken() } : {},
+        body: form,
+        signal: AbortSignal.timeout(75000)
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.message || 'Upload gagal.');
+      return result;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Upload gagal.';
+      window.dispatchEvent(new CustomEvent('portal-api-error', { detail: message }));
+      return { status: 'error', message };
+    }
+  },
+
+  /** Wait at most 30 seconds; callers retain the upload ID on timeout. */
+  async waitForAssetReady(assetId: string) {
+    const deadline = Date.now() + 30000;
+    while (Date.now() < deadline) {
+      const response = await fetch(`${API_BASE_URL}/assets/${encodeURIComponent(assetId)}`, {
+        headers: this.getToken() ? { Authorization: 'Bearer ' + this.getToken() } : {},
+        signal: AbortSignal.timeout(Math.min(10000, Math.max(1, deadline - Date.now()))), cache: 'no-store'
+      });
+      const asset = await response.json();
+      if (!response.ok) throw new Error(asset.message || 'Status file belum dapat diperiksa. Silakan coba kembali.');
+      if (asset.cdnStatus === 'READY') return asset;
+      if (['FAILED', 'DELETED', 'DELETE_PENDING'].includes(asset.cdnStatus)) throw new Error('File gagal diproses storage. Pilih ulang file.');
+      await new Promise(resolve => setTimeout(resolve, Math.min(2000, Math.max(0, deadline - Date.now()))));
+    }
+    throw new Error('File belum selesai diproses oleh storage. Silakan coba kembali; file yang sudah diunggah tetap tersimpan.');
+  },
+
+  /** @deprecated Use uploadFileCdn() instead. */
   async uploadFile(base64: string, fileName: string, oldUrl?: string, folderType: string = 'asetweb') {
     const data = base64.includes(',') ? base64.split(',')[1] : base64;
     return await this.postData('uploadFile', {
-      data, 
-      fileName, 
+      data,
+      fileName,
       mimeType: base64.match(/^data:([^;]+);/)?.[1] || 'image/png',
       oldUrl, folderType,
       label: fileName,
@@ -258,3 +312,4 @@ export const api = {
     }
   }
 };
+

@@ -226,6 +226,11 @@ before(async () => {
   await control.query(schema);
   process.env.DB_NAME = database;
   process.env.NODE_ENV = 'test';
+  // This suite verifies legacy DB binaries; never upload fixtures to real CDN.
+  process.env.KROOMBOX_CDN_BASE_URL = 'http://127.0.0.1:1';
+  process.env.KROOMBOX_CDN_API_KEY = '';
+  process.env.KROOMBOX_CDN_JWT = '';
+  process.env.KROOMBOX_CDN_SYNC_ENABLED = 'false';
   process.env.JWT_SECRET = crypto.randomBytes(32).toString('hex');
   provider = http.createServer((req, res) => {
     res.setHeader('Content-Type', 'application/json');
@@ -238,6 +243,7 @@ before(async () => {
   const app = (await import('../server.js')).default;
   db = (await import('../lib/db.js')).default;
   await (await import('../scripts/migrate.js')).migrate();
+  await db.execute("INSERT INTO article_tags (id,name,slug) VALUES ('tag,with comma','Fixture one','fixture-one'),('two','Fixture two','fixture-two'),('keep','Fixture keep','fixture-keep')");
   server = app.listen(0, '127.0.0.1');
   await new Promise(resolve => server.once('listening', resolve));
   base = `http://127.0.0.1:${server.address().port}/api`;
@@ -456,7 +462,8 @@ test('partial edits preserve data; missing records and invalid quotas are reject
   await bridge('updateAssets', { data: { bgFront: 'partial-front' } });
   assert.equal((await request('/data/assets')).logoUrl, 'new-logo');
   await bridge('manageArticle', { type: 'delete', id: created.id });
-  const health = await request('/health'); assert.equal(health.database, 'UP');
+  await db.execute("DELETE FROM article_tags WHERE id IN ('tag,with comma','two','keep')");
+  const health = await request('/health'); assert.equal(health.database, 'ok');
   assert.ok(Array.isArray((await request('/data/getRepoFiles', undefined, studentToken)).items));
   assert.ok(Array.isArray((await request('/data/getAdminRepoData')).items));
   const { migrate } = await import('../scripts/migrate.js');

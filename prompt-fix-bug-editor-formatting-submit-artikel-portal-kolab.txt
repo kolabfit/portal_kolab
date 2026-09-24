@@ -1,0 +1,1450 @@
+Bertindaklah sebagai senior full-stack developer yang berpengalaman dengan React contentEditable, rich-text editor, asynchronous file upload, Kroombox CDN integration, dan debugging submit flow.
+
+Pelajari terlebih dahulu seluruh source code Portal Ko+Lab terbaru, khususnya:
+
+- Role STUDENT
+- Article
+- Entry Artikel Baru / Create Article
+- Edit Article
+- Article editor
+- Rich text toolbar
+- State form article
+- Category
+- Tag
+- Thumbnail
+- Attachment
+- Kroombox CDN upload
+- Submit article
+- Article detail/view
+- Backend article API
+- Validation
+- Sanitization HTML
+
+Gunakan video uji coba yang telah dilampirkan sebagai dasar reproduksi bug.
+
+Jangan hanya memperbaiki tampilan.
+
+Cari ROOT CAUSE dari bug editor, formatting, dan submit secara end-to-end.
+
+Bug yang harus diperbaiki:
+
+1. Saat mengisi deskripsi/isi artikel, editor tidak stabil.
+2. Saat mengubah format tulisan, selection/caret bermasalah.
+3. Saat klik Bold / Italic / H2 / H3 / Bullet / Numbered List, formatting tidak selalu diterapkan dengan benar.
+4. Saat submit, proses dapat berlangsung terlalu lama / hang.
+5. Saat submit, isi/deskripsi artikel TIBA-TIBA HILANG.
+6. Form terlihat reset/kosong sebelum backend benar-benar selesai menyimpan.
+7. Jika submit gagal, user berisiko kehilangan isi artikel.
+8. Thumbnail dan attachment juga harus tetap mengikuti flow submit yang benar.
+
+==================================================
+1. REPRODUCE BUG BERDASARKAN VIDEO
+==================================================
+
+Reproduce persis flow berikut:
+
+1. Buka Entry Artikel Baru.
+2. Isi Judul Artikel.
+3. Pilih Kategori.
+4. Pilih Tag.
+5. Upload Thumbnail jika ada.
+6. Upload Attachment jika ada.
+7. Isi/paste beberapa paragraf di Isi Artikel.
+8. Select sebagian text.
+9. Klik Bold.
+10. Klik Italic.
+11. Klik H2/H3.
+12. Klik Bullet List / Numbered List.
+13. Lanjut mengetik/edit isi artikel.
+14. Klik Simpan Artikel.
+
+Amati:
+
+- caret;
+- selection;
+- editor focus;
+- editor DOM;
+- editorRef.current.innerHTML;
+- state content;
+- state form;
+- re-render React;
+- toolbar click;
+- state submit;
+- payload request;
+- thumbnail upload;
+- attachment upload;
+- Kroombox CDN processing;
+- backend response;
+- kapan form di-reset.
+
+Jangan mulai perbaikan sebelum bug berhasil direproduce.
+
+==================================================
+2. BUG KRITIS: DESKRIPSI HILANG SAAT SUBMIT
+==================================================
+
+Ini merupakan bug tambahan yang WAJIB diprioritaskan.
+
+Saat user klik:
+
+SIMPAN ARTIKEL
+
+deskripsi/isi artikel tiba-tiba menjadi kosong/hilang sebelum proses submit benar-benar selesai.
+
+Cari root cause spesifik.
+
+Periksa kemungkinan berikut:
+
+A. Form di-reset terlalu cepat:
+
+setContent('');
+setDescription('');
+editorRef.current.innerHTML = '';
+resetForm();
+setFormData(initialState);
+
+dipanggil SEBELUM:
+
+await createArticle(...)
+
+selesai.
+
+B. useEffect menulis ulang editor:
+
+useEffect(() => {
+  editorRef.current.innerHTML = content;
+}, [content]);
+
+kemudian saat submit ada state berubah:
+
+isSubmitting
+uploading
+thumbnailUrl
+attachmentIds
+tagIds
+
+yang menyebabkan component re-render dan content menjadi empty/stale.
+
+C. submit handler membaca state lama/stale:
+
+content
+
+padahal:
+
+editorRef.current.innerHTML
+
+masih memiliki isi terbaru.
+
+D. state content di-clear untuk loading state.
+
+E. modal close/reset logic terpanggil sebelum response backend success.
+
+F. parent component mengubah key prop saat submit sehingga editor di-remount.
+
+G. conditional rendering seperti:
+
+isSubmitting
+  ? loadingComponent
+  : editor
+
+yang menyebabkan editor component unmount.
+
+H. reset state pada finally:
+
+finally {
+  resetForm();
+}
+
+Padahal reset hanya boleh saat success.
+
+I. selected article / create state tercampur sehingga submit memicu initialize ulang editor kosong.
+
+Agent WAJIB menemukan root cause aktual di source code.
+
+Jangan hanya menambahkan workaround.
+
+==================================================
+3. ATURAN UTAMA: FORM TIDAK BOLEH RESET SAAT SUBMIT DIMULAI
+==================================================
+
+Flow yang SALAH:
+
+Submit
+↓
+setSubmitting(true)
+↓
+clear editor
+↓
+upload
+↓
+create article
+
+Flow yang BENAR:
+
+Submit
+↓
+snapshot seluruh form
+↓
+setSubmitting(true)
+↓
+upload media
+↓
+create article
+↓
+save tags
+↓
+save attachment relations
+↓
+backend confirms SUCCESS
+↓
+baru reset form
+↓
+close modal
+↓
+refresh list
+
+Jika gagal:
+
+FORM HARUS TETAP UTUH.
+
+==================================================
+4. RESET FORM HANYA SAAT SUCCESS
+==================================================
+
+Cari semua code:
+
+resetForm()
+clearForm()
+clearEditor()
+setContent('')
+setTitle('')
+setCategoryId('')
+setTagIds([])
+setThumbnail(...)
+setAttachments([])
+
+Pastikan code tersebut hanya dipanggil setelah:
+
+article benar-benar berhasil disimpan.
+
+Jangan reset di:
+
+try sebelum await
+finally
+startSubmit
+upload start
+
+Contoh:
+
+try {
+  setSubmitting(true);
+
+  const result = await saveArticle(payload);
+
+  if (!result.success) {
+    throw new Error(...);
+  }
+
+  // HANYA DI SINI
+  resetForm();
+  closeModal();
+  refreshArticles();
+} catch (error) {
+  // JANGAN RESET FORM
+  showError();
+} finally {
+  setSubmitting(false);
+}
+
+==================================================
+5. SNAPSHOT FORM SEBELUM ASYNC SUBMIT
+==================================================
+
+Sebelum request async dijalankan, ambil snapshot seluruh input.
+
+Contoh konseptual:
+
+const currentHtml =
+  editorRef.current?.innerHTML ??
+  contentHtml;
+
+const submitSnapshot = {
+  title: title.trim(),
+  publicationDate,
+  categoryId,
+  tagIds: [...tagIds],
+  content: currentHtml,
+  thumbnailFile,
+  attachments: [...selectedFiles],
+};
+
+Gunakan snapshot ini selama seluruh submit pipeline.
+
+Jangan membaca ulang state yang bisa berubah di tengah proses tanpa alasan.
+
+==================================================
+6. CONTENT SOURCE SAAT SUBMIT
+==================================================
+
+Saat submit, sumber content utama harus merupakan DOM editor terbaru:
+
+editorRef.current?.innerHTML
+
+dan bukan state stale.
+
+Contoh:
+
+const html =
+  editorRef.current?.innerHTML ||
+  contentHtml ||
+  '';
+
+Kemudian validasi html tersebut.
+
+Pastikan formatting terbaru:
+
+Bold
+Italic
+H2
+H3
+List
+
+sudah masuk ke HTML sebelum request.
+
+==================================================
+7. JANGAN MEMBUAT EDITOR UNMOUNT SAAT SUBMIT
+==================================================
+
+Cari conditional rendering seperti:
+
+{isSubmitting ? (
+  <Loading />
+) : (
+  <Editor />
+)}
+
+Jika ada, ini dapat membuat editor unmount dan isi terlihat hilang.
+
+Perbaiki menjadi:
+
+Editor tetap render.
+
+Saat submit:
+
+- disable editor;
+- disable toolbar;
+- tampilkan overlay/loading indicator;
+- content tetap terlihat.
+
+Contoh:
+
+<div className="relative">
+  <Editor disabled={isSubmitting} />
+
+  {isSubmitting && (
+    <LoadingOverlay />
+  )}
+</div>
+
+Jangan mengganti seluruh editor dengan loading component.
+
+==================================================
+8. JANGAN UBAH REACT KEY EDITOR SAAT SUBMIT
+==================================================
+
+Periksa apakah editor memiliki:
+
+key={...}
+
+yang bergantung pada:
+
+isSubmitting
+articleId
+modalState
+timestamp
+category
+tag
+
+Jika key berubah, React akan remount editor.
+
+Ini dapat menyebabkan:
+
+deskripsi hilang.
+
+Pastikan editor tidak remount selama submit.
+
+==================================================
+9. BUG CONTENTEDITABLE + REACT RE-RENDER
+==================================================
+
+Audit component editor.
+
+Cari pattern:
+
+<div
+  contentEditable
+  ref={editorRef}
+  onInput={...}
+/>
+
+dan:
+
+editorRef.current.innerHTML = content;
+
+Periksa apakah innerHTML ditulis ulang setiap state change/render.
+
+Jika ya, ini sangat mungkin menyebabkan:
+
+- caret hilang;
+- selection hilang;
+- formatting rusak;
+- undo history hilang;
+- content reset.
+
+==================================================
+10. CONTENTEDITABLE ARCHITECTURE YANG DIREKOMENDASIKAN
+==================================================
+
+Selama user mengetik:
+
+DOM contentEditable menjadi editing source.
+
+Gunakan:
+
+const handleEditorInput = () => {
+  if (!editorRef.current) return;
+  setContentHtml(editorRef.current.innerHTML);
+};
+
+Tetapi jangan menulis kembali:
+
+editorRef.current.innerHTML = contentHtml
+
+setiap contentHtml berubah.
+
+Populate DOM hanya saat:
+
+A. Create modal pertama kali dibuka.
+B. Edit Article pertama kali load.
+C. Setelah form benar-benar sukses di-reset.
+
+==================================================
+11. INITIALIZE EDITOR SEKALI
+==================================================
+
+Create Article:
+
+modal open
+↓
+initialize empty sekali
+
+Edit Article:
+
+article loaded
+↓
+populate existing HTML sekali
+
+Perubahan state berikut TIDAK BOLEH reset editor:
+
+- category;
+- tag;
+- thumbnail;
+- attachment;
+- upload progress;
+- isSubmitting;
+- error;
+- success toast;
+- dropdown state.
+
+==================================================
+12. BUG TOOLBAR & FOCUS
+==================================================
+
+Toolbar:
+
+Bold
+Italic
+H2
+H3
+Bullet List
+Numbered List
+
+memiliki potensi bug karena klik tombol membuat focus berpindah dari editor.
+
+Flow bug:
+
+select text
+↓
+klik toolbar
+↓
+button focus
+↓
+editor kehilangan selection
+↓
+format diterapkan ke lokasi salah / gagal
+
+Perbaiki.
+
+==================================================
+13. TOOLBAR MOUSE DOWN
+==================================================
+
+Untuk toolbar button, gunakan approach seperti:
+
+onMouseDown={(e) => {
+  e.preventDefault();
+}}
+
+sehingga toolbar tidak mencuri selection sebelum format command.
+
+Kemudian:
+
+editorRef.current?.focus();
+
+dan jalankan command.
+
+Verifikasi approach ini terhadap implementation aktual.
+
+==================================================
+14. SAVE / RESTORE SELECTION
+==================================================
+
+Jika preventDefault belum cukup, implementasikan:
+
+saveSelection()
+restoreSelection()
+
+menggunakan:
+
+window.getSelection()
+Range
+
+Flow:
+
+selection di editor
+↓
+save range
+↓
+toolbar action
+↓
+restore range
+↓
+apply format
+
+Pastikan range memang berada di editor.
+
+==================================================
+15. FORMAT COMMAND
+==================================================
+
+Audit setiap command.
+
+Jika memakai:
+
+document.execCommand()
+
+pastikan mapping benar:
+
+Bold:
+bold
+
+Italic:
+italic
+
+H2:
+formatBlock → H2
+
+H3:
+formatBlock → H3
+
+Bullet:
+insertUnorderedList
+
+Number:
+insertOrderedList
+
+Jangan implement heading dengan cara replace seluruh innerHTML.
+
+==================================================
+16. SYNC HTML SETELAH FORMAT
+==================================================
+
+Setelah command berhasil:
+
+setContentHtml(
+  editorRef.current?.innerHTML || ''
+);
+
+Ini penting agar state membawa HTML terbaru.
+
+==================================================
+17. JANGAN FORMAT SELURUH ARTIKEL TANPA SELECTION
+==================================================
+
+Pastikan behavior toolbar sesuai intent.
+
+Jika selection aktif:
+
+format hanya selection/paragraph terkait.
+
+Jangan menghapus isi lain.
+
+==================================================
+18. TEST CARET
+==================================================
+
+Setelah:
+
+Bold
+Italic
+Heading
+List
+
+user harus tetap dapat melanjutkan mengetik tanpa caret lompat ke awal/akhir.
+
+==================================================
+19. PASTE HANDLING
+==================================================
+
+Audit paste.
+
+Pastikan paste beberapa paragraf:
+
+- tidak mengganti seluruh existing article;
+- tidak membersihkan seluruh editor;
+- tidak membuat editor crash.
+
+Jika paste HTML dari luar:
+
+sanitize.
+
+Jika plain text:
+
+pertahankan paragraph/line break secara wajar.
+
+==================================================
+20. CONTENT SANITIZATION
+==================================================
+
+Karena article content adalah HTML, pastikan sanitization aman.
+
+Allowed format minimal:
+
+p
+br
+strong
+b
+em
+i
+h2
+h3
+ul
+ol
+li
+
+dan link jika supported.
+
+Reject:
+
+script
+iframe berbahaya
+onclick
+onerror
+javascript:
+
+Jangan memperbaiki editor dengan menghapus security sanitizer.
+
+==================================================
+21. VALIDASI EDITOR YANG BENAR
+==================================================
+
+Jangan hanya:
+
+contentHtml.length > 0
+
+karena:
+
+<br>
+<p><br></p>
+
+secara visual kosong.
+
+Buat helper seperti:
+
+isRichTextEmpty(html)
+
+dengan textContent.trim().
+
+Jika kosong:
+
+Isi artikel wajib diisi.
+
+==================================================
+22. BUG SUBMIT / LOADING
+==================================================
+
+Dari video submit terlihat dapat berlangsung lama.
+
+Audit seluruh submit pipeline:
+
+- validation;
+- thumbnail upload;
+- attachment upload;
+- CDN processing;
+- article create;
+- tag relations;
+- attachment relations;
+- refresh list.
+
+Catat durasi setiap tahap saat debugging.
+
+==================================================
+23. SUBMIT STAGE
+==================================================
+
+Gunakan state eksplisit:
+
+type ArticleSubmitStage =
+  | 'IDLE'
+  | 'VALIDATING'
+  | 'UPLOADING_MEDIA'
+  | 'SAVING_ARTICLE'
+  | 'COMPLETED'
+  | 'FAILED';
+
+UI:
+
+VALIDATING:
+Memeriksa data...
+
+UPLOADING_MEDIA:
+Mengunggah file...
+
+SAVING_ARTICLE:
+Menyimpan artikel...
+
+Jangan hanya "MENYIMPAN..." untuk semua tahap.
+
+==================================================
+24. KROOMBOX CDN POLLING
+==================================================
+
+Jika thumbnail/attachment menggunakan Kroombox CDN async:
+
+upload
+↓
+fileId
+↓
+processing
+↓
+poll status
+↓
+READY
+
+Polling wajib memiliki:
+
+- max attempts;
+- timeout;
+- interval.
+
+Jangan gunakan loop tanpa batas:
+
+while (status !== READY)
+
+Contoh reasonable:
+
+interval 1–2 detik
+maksimal 30–60 detik
+
+Sesuaikan guide Kroombox CDN aktual.
+
+==================================================
+25. CDN TIMEOUT
+==================================================
+
+Jika CDN tidak READY sampai batas waktu:
+
+throw error.
+
+UI:
+
+File belum selesai diproses oleh storage.
+Silakan coba kembali.
+
+Jangan biarkan button loading selamanya.
+
+==================================================
+26. CDN ERROR TIDAK BOLEH CLEAR FORM
+==================================================
+
+Jika thumbnail/attachment gagal upload:
+
+- deskripsi tetap ada;
+- judul tetap ada;
+- kategori tetap;
+- tag tetap;
+- editor tetap render;
+- modal tetap buka.
+
+User dapat retry.
+
+==================================================
+27. ATTACHMENT UPLOAD
+==================================================
+
+Jika ada beberapa attachment:
+
+hindari upload sequential jika tidak perlu.
+
+Gunakan concurrency kecil / Promise.all bila aman.
+
+Contoh maksimal 5 attachment.
+
+Jangan membuat 5 attachment menyebabkan submit sangat lama secara tidak perlu.
+
+==================================================
+28. THUMBNAIL
+==================================================
+
+Thumbnail upload tidak boleh menghapus editor state.
+
+Pastikan perubahan:
+
+thumbnailAssetId
+thumbnailUrl
+uploadProgress
+
+tidak menyebabkan editor initialize ulang.
+
+==================================================
+29. ARTICLE PAYLOAD
+==================================================
+
+Audit payload actual.
+
+Pastikan submit membawa:
+
+title
+publicationDate/date
+categoryId
+tagIds
+content
+thumbnail reference
+attachments
+
+Periksa bug existing seperti:
+
+tags: []
+
+padahal tag sudah dipilih.
+
+Periksa content:
+
+jangan sampai content: ''
+
+karena state stale.
+
+==================================================
+30. BACKEND REQUEST LOGIC
+==================================================
+
+Audit endpoint create article.
+
+Pastikan backend tidak:
+
+- overwrite content menjadi '';
+- default content ke empty saat field salah nama;
+- membaca description sedangkan frontend mengirim content;
+- membaca content sedangkan frontend mengirim description;
+- overwrite saat insert/update.
+
+Cek field naming end-to-end.
+
+==================================================
+31. FIELD NAME CONSISTENCY
+==================================================
+
+Pastikan frontend dan backend konsisten.
+
+Contoh pilih satu:
+
+content
+
+atau:
+
+description
+
+Jangan terjadi:
+
+frontend:
+content
+
+backend:
+description
+
+database:
+content
+
+yang menyebabkan isi kosong.
+
+Jika existing database menggunakan content, pertahankan content.
+
+==================================================
+32. DATABASE INSERT
+==================================================
+
+Audit query INSERT article.
+
+Pastikan content benar-benar ikut query.
+
+Contoh:
+
+INSERT INTO articles (
+  id,
+  title,
+  content,
+  ...
+)
+
+VALUES (...);
+
+Jangan lupa parameter content.
+
+==================================================
+33. DATABASE UPDATE
+==================================================
+
+Audit Edit Article juga.
+
+Pastikan UPDATE:
+
+content = ?
+
+tidak menerima:
+
+undefined
+null
+''
+
+kecuali user benar-benar mengosongkan article dan validasi mengizinkan.
+
+==================================================
+34. BACKEND VALIDATION RESPONSE
+==================================================
+
+Gunakan response structured.
+
+Contoh:
+
+{
+  "error": "VALIDATION_ERROR",
+  "field": "content",
+  "message": "Isi artikel wajib diisi."
+}
+
+Frontend menampilkan error tanpa reset.
+
+==================================================
+35. SUBMIT SUCCESS
+==================================================
+
+Baru setelah:
+
+- backend response success;
+- article ID valid;
+- relasi tag tersimpan;
+- attachment relation tersimpan;
+
+lakukan:
+
+resetForm()
+closeModal()
+refreshArticles()
+showSuccessToast()
+
+==================================================
+36. SUBMIT FAILURE
+==================================================
+
+Catch:
+
+showError(...)
+
+Jangan:
+
+resetForm()
+closeModal()
+
+Finally:
+
+setSubmitting(false)
+
+Jangan reset di finally.
+
+==================================================
+37. PREVENT DOUBLE SUBMIT
+==================================================
+
+Saat submit:
+
+disable Save.
+
+Double click tidak boleh membuat dua artikel.
+
+==================================================
+38. TOOLBAR SELAMA SUBMIT
+==================================================
+
+Saat submit:
+
+toolbar/editor dapat disable.
+
+Tapi content tetap terlihat.
+
+Jangan unmount editor.
+
+==================================================
+39. MODAL CLOSE SAAT SUBMIT
+==================================================
+
+Pilih behavior aman:
+
+- disable Batal/X selama submit;
+
+atau:
+
+- confirmation.
+
+Jangan kehilangan draft.
+
+==================================================
+40. DRAFT PROTECTION OPSIONAL
+==================================================
+
+Jika mudah:
+
+simpan draft sementara di sessionStorage/local draft.
+
+Namun bukan prioritas.
+
+Yang wajib:
+
+submit error tidak menghilangkan deskripsi.
+
+==================================================
+41. CREATE DAN EDIT HARUS SAMA-SAMA DICEK
+==================================================
+
+Test:
+
+Create Article
+Edit Article
+
+Jangan memperbaiki Create tetapi merusak Edit.
+
+==================================================
+42. VIEW ARTICLE
+==================================================
+
+Setelah artikel berhasil disimpan:
+
+buka detail.
+
+Pastikan:
+
+- deskripsi tampil;
+- H2/H3 tampil;
+- Bold tampil;
+- Italic tampil;
+- list tampil.
+
+Jika deskripsi kosong:
+
+telusuri database, API, atau render.
+
+==================================================
+43. DEBUG DATABASE
+==================================================
+
+Setelah submit test:
+
+cek row article di database.
+
+Pastikan content tidak kosong.
+
+Jika database memiliki HTML tetapi UI kosong:
+
+bug ada di response/render.
+
+Jika database kosong:
+
+bug ada di submit/backend/database mapping.
+
+==================================================
+44. DEBUG LAYER-BY-LAYER
+==================================================
+
+Untuk bug deskripsi hilang, laporkan nilai pada:
+
+1. editorRef.current.innerHTML sebelum submit.
+2. contentHtml sebelum submit.
+3. submit snapshot.content.
+4. request payload.content.
+5. backend req.body.content.
+6. SQL parameter content.
+7. database articles.content.
+8. GET articles response content.
+9. rendered selectedArticle.content.
+
+Dengan ini root cause dapat diketahui pasti.
+
+==================================================
+45. ROOT CAUSE REPORT WAJIB
+==================================================
+
+Agent wajib melaporkan:
+
+BUG 1 — Isi/deskripsi saat mengetik
+
+Root Cause:
+...
+
+Fix:
+...
+
+BUG 2 — Formatting text
+
+Root Cause:
+...
+
+Fix:
+...
+
+BUG 3 — Deskripsi hilang saat submit
+
+Root Cause:
+...
+
+Fix:
+...
+
+BUG 4 — Submit lambat/hang
+
+Root Cause:
+...
+
+Fix:
+...
+
+Jangan hanya menulis:
+
+"Bug sudah diperbaiki."
+
+==================================================
+46. TEST INPUT
+==================================================
+
+1. Ketik satu kalimat.
+2. Ketik beberapa paragraf.
+3. Paste artikel panjang.
+4. Delete sebagian.
+5. Insert text di tengah.
+6. Caret tidak lompat.
+7. Content tidak hilang.
+
+==================================================
+47. TEST FORMAT
+==================================================
+
+8. Select kata → Bold.
+9. Select kalimat → Italic.
+10. Paragraph → H2.
+11. Paragraph → H3.
+12. Bullet List.
+13. Numbered List.
+14. Kombinasi formatting.
+15. Continue typing.
+16. HTML tetap benar.
+
+==================================================
+48. TEST STATE RE-RENDER
+==================================================
+
+Dengan editor berisi article:
+
+ubah:
+
+- category;
+- tag;
+- thumbnail;
+- attachment.
+
+Pastikan description tidak hilang.
+
+==================================================
+49. TEST SUBMIT TANPA MEDIA
+==================================================
+
+Create article:
+
+- tanpa thumbnail;
+- tanpa attachment.
+
+Harus sukses.
+
+Description harus tetap tersimpan.
+
+==================================================
+50. TEST SUBMIT DENGAN THUMBNAIL
+==================================================
+
+Upload thumbnail.
+
+Submit.
+
+Pastikan:
+
+- editor tidak reset saat thumbnail upload;
+- description tersimpan;
+- thumbnail tersimpan.
+
+==================================================
+51. TEST SUBMIT DENGAN ATTACHMENT
+==================================================
+
+Upload PDF.
+
+Submit.
+
+Pastikan:
+
+- attachment tersimpan;
+- description tidak hilang;
+- submit selesai.
+
+==================================================
+52. TEST SUBMIT FAILURE
+==================================================
+
+Simulasikan article API gagal.
+
+Pastikan:
+
+- modal tetap buka;
+- description tetap ada;
+- formatting tetap;
+- title tetap;
+- category tetap;
+- tag tetap;
+- button kembali aktif.
+
+==================================================
+53. TEST CDN FAILURE
+==================================================
+
+Simulasikan Kroombox CDN timeout/error.
+
+Pastikan:
+
+- description tetap ada;
+- form tidak reset;
+- user dapat retry.
+
+==================================================
+54. TEST LONG CONTENT
+==================================================
+
+Test beberapa ribu karakter.
+
+Pastikan:
+
+- editor responsif;
+- content tidak terpotong;
+- submit benar.
+
+==================================================
+55. TEST RAPID TOOLBAR
+==================================================
+
+Klik:
+
+Bold
+Italic
+H2
+H3
+List
+
+secara berulang.
+
+Tidak boleh:
+
+- content hilang;
+- duplicate;
+- crash;
+- selection rusak.
+
+==================================================
+56. COMPONENTIZATION
+==================================================
+
+Jika editor terlalu terikat pada ArticleView besar, pertimbangkan component:
+
+components/article/RichTextEditor.tsx
+
+Props:
+
+initialValue
+onChange
+disabled
+
+Editor mengelola internal ref.
+
+Tujuan:
+
+mengisolasi contentEditable dari re-render state lain.
+
+Jangan refactor besar jika tidak perlu.
+
+==================================================
+57. REACT MEMOIZATION
+==================================================
+
+Jika parent re-render menyebabkan editor instability, gunakan secara wajar:
+
+React.memo
+useCallback
+
+Tetapi root cause harus tetap diperbaiki.
+
+==================================================
+58. SECURITY
+==================================================
+
+Jangan log:
+
+- Kroombox API Key;
+- Kroombox JWT;
+- user auth token.
+
+Sanitize HTML article.
+
+Jangan hilangkan XSS protection existing.
+
+==================================================
+59. BUILD
+==================================================
+
+Setelah fix:
+
+Frontend:
+
+npm run build
+
+Backend:
+
+npm test
+
+Jalankan test article/editor baru.
+
+Perbaiki seluruh error sebelum menyatakan selesai.
+
+==================================================
+60. ACCEPTANCE CRITERIA
+==================================================
+
+EDITOR
+
+✓ User dapat mengetik normal
+✓ Paste text aman
+✓ Caret tidak lompat
+✓ State lain tidak mereset editor
+
+FORMATTING
+
+✓ Bold benar
+✓ Italic benar
+✓ H2 benar
+✓ H3 benar
+✓ Bullet benar
+✓ Numbered list benar
+✓ Selection tidak hilang
+✓ Format tidak menghapus content
+
+DESKRIPSI SAAT SUBMIT
+
+✓ Deskripsi tetap terlihat setelah klik Simpan
+✓ Deskripsi tidak menjadi kosong selama loading
+✓ Deskripsi terbaru masuk payload
+✓ Backend menerima description/content benar
+✓ Database menyimpan HTML description
+✓ Detail article menampilkan description
+✓ Form baru di-reset setelah SUCCESS
+
+SUBMIT
+
+✓ Tidak hang tanpa timeout
+✓ Kroombox upload memiliki timeout
+✓ Thumbnail berhasil
+✓ Attachment berhasil
+✓ Tag berhasil
+✓ Category berhasil
+
+FAILURE
+
+✓ Submit gagal tidak menghapus description
+✓ CDN gagal tidak menghapus description
+✓ Modal tetap terbuka
+✓ User dapat retry
+
+QUALITY
+
+✓ Create Article bekerja
+✓ Edit Article bekerja
+✓ View Article bekerja
+✓ Build berhasil
+✓ Test berhasil
+
+==================================================
+61. IMPLEMENTATION REPORT
+==================================================
+
+Setelah selesai berikan:
+
+ARTICLE EDITOR & SUBMIT BUG FIX SUMMARY
+
+1. Video Bug Reproduction
+2. Editor Root Cause
+3. Formatting Root Cause
+4. Description Disappearing Root Cause
+5. Submit Delay Root Cause
+6. contentEditable Architecture Fix
+7. Selection / Focus Fix
+8. Formatting Command Fix
+9. Editor State Synchronization Fix
+10. Description Persistence Fix
+11. Submit Snapshot Fix
+12. Submit Pipeline Fix
+13. Kroombox CDN Upload Analysis
+14. Loading State Fix
+15. Form Reset Fix
+16. Backend Field Mapping
+17. Database Persistence Verification
+18. Security / Sanitization
+19. Files Modified
+20. Tests Added
+21. Manual Verification
+22. Frontend Build Result
+23. Backend Test Result
+24. Known Limitations
+
+Jangan hanya memberikan rekomendasi.
+
+Implementasikan fix langsung pada source code Portal Ko+Lab.
+
+Reproduce bug dari video terlebih dahulu.
+
+Prioritaskan bug KRITIS:
+
+"Saat klik Simpan Artikel, deskripsi/isi artikel tidak boleh tiba-tiba hilang."
+
+Identifikasi root cause sebenarnya, perbaiki editor + formatting + submit flow, jalankan tests dan build, lalu berikan implementation summary.

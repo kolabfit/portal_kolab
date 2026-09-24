@@ -1,4 +1,4 @@
-import express from 'express';
+﻿import express from 'express';
 import pool from '../lib/db.js';
 import axios from 'axios';
 import crypto from 'node:crypto';
@@ -7,6 +7,8 @@ import { record } from '../lib/serializers.js';
 import { saveProfile } from '../lib/profile.js';
 import { repositoryActions, repositoryAction } from '../lib/repository.js';
 import { manageInternship } from '../lib/internships.js';
+import { saveArticleRelations } from '../lib/articleRelations.js';
+import { validateArticleContent } from '../lib/articleHtml.js';
 
 const router = express.Router();
 const GAS_URL = process.env.GAS_URL;
@@ -437,7 +439,10 @@ router.post('/', requireSession, async (req, res) => {
 
       case 'manageArticle':
       case 'articleAction':
+        if (type !== 'delete') data.content = validateArticleContent(data.content);
         if (type === 'delete') {
+          await db.execute('DELETE FROM article_tag_map WHERE article_id=?', [id]);
+          await db.execute('DELETE FROM article_attachments WHERE article_id=?', [id]);
           await db.execute('DELETE FROM articles WHERE id=?', [id]);
         } else if (type === 'add') {
           await db.execute(
@@ -450,6 +455,7 @@ router.post('/', requireSession, async (req, res) => {
             [data.title, data.content || '', data.date, data.author || '', JSON.stringify(Array.isArray(data.tags) ? data.tags : String(data.tags || '').split(',').filter(Boolean)), data.categoryId || '', data.imageUrl || '', data.videoUrl || '', data.otherUrl || '', id]
           );
         }
+        if (type !== 'delete') await saveArticleRelations(db, id, data, req.user);
         return await success({ status: 'success', id });
 
       case 'manageYPlaylist':
@@ -487,8 +493,9 @@ router.post('/', requireSession, async (req, res) => {
   } catch (error) {
     if (db) await db.rollback();
     if (!error.status) console.error(`Bridge action [${action}] failed:`, error);
-    return res.status(error.status || 500).json({ status: 'error', message: error.message });
+    return res.status(error.status || 500).json({ status: 'error', message: error.message, ...(error.field ? { error: error.error, field: error.field } : {}) });
   } finally { if (db) { await db.rollback(); db.release(); } }
 });
 
 export default router;
+

@@ -1,11 +1,11 @@
-import { STARTUP_POSITIONS, STARTUP_POSITION_LABELS, startupPositionLabel } from '../startupPositions';
+﻿import { STARTUP_POSITIONS, STARTUP_POSITION_LABELS, startupPositionLabel } from '../startupPositions';
 import StartupPositionSelect from '../components/StartupPositionSelect';
 import type { StartupPosition } from '../types';
 
 import React, { useEffect, useState } from 'react';
 import { 
   Trash2, Search, Rocket, HardDrive, 
-  Plus, X, Save, UserPlus, Edit3, Loader2, CheckCircle2, UserCircle, Globe, Instagram, Lock, Unlock, Users, ShieldAlert, Fingerprint, BookOpen, User, Filter, Briefcase, Building2, RefreshCw, Upload, Download, FileSpreadsheet, FileText, ListChecks
+  Plus, X, Save, ArrowRight, UserPlus, Edit3, Loader2, CheckCircle2, UserCircle, Globe, Instagram, Lock, Unlock, Users, ShieldAlert, Fingerprint, BookOpen, User, Filter, Briefcase, Building2, RefreshCw, Upload, Download, FileSpreadsheet, FileText, ListChecks
 } from 'lucide-react';
 import { api } from '../api';
 import { StartupTeam, UserRole, UserProfile, StudentJobDesk } from '../types';
@@ -44,6 +44,7 @@ const MemberManagementView: React.FC<MemberManagementViewProps> = ({ userRole, s
   
   // Modal & Popup States
   const [showAddMember, setShowAddMember] = useState(false);
+  const [showTeamModal, setShowTeamModal] = useState<StartupTeam | null>(null);
   const [showStartupModal, setShowStartupModal] = useState<{ isOpen: boolean; mode: 'add' | 'edit'; item?: StartupTeam }>({ isOpen: false, mode: 'add' });
   const [editingQuota, setEditingQuota] = useState<any | null>(null);
   const [editingIdentity, setEditingIdentity] = useState<any | null>(null);
@@ -425,21 +426,20 @@ const MemberManagementView: React.FC<MemberManagementViewProps> = ({ userRole, s
     
     let logoUrl = startupLogoPreview || showStartupModal.item?.logoUrl || '';
     if (startupLogoPreview && startupLogoPreview.startsWith('data:')) {
-       const uploadRes = await api.postData('uploadFile', { 
-         data: startupLogoPreview.split(',')[1], 
-         fileName: `logo-startup-${Date.now()}.png`, 
-         mimeType: startupLogoPreview.match(/^data:([^;]+);/)?.[1] || 'image/png',
-         folderType: 'asetweb'
-       });
-       if (uploadRes?.status === 'success') logoUrl = uploadRes.url;
-       else { onShowAlert('Upload gagal', uploadRes?.message || 'Logo belum tersimpan.', 'error'); setIsProcessingStartup(false); return; }
-    }
-
-    const payload = {
+        const resF = await fetch(startupLogoPreview);
+        const blob = await resF.blob();
+        const file = new File([blob], `logo-startup-${Date.now()}.png`, { type: 'image/png' });
+        const resCdn = await api.uploadFileCdn(file, 'STARTUP', showStartupModal.item?.id || 'new', 'public');
+        if (resCdn?.status === 'success') logoUrl = resCdn.asset?.deliveryUrl || resCdn.asset?.url || '';
+        else { onShowAlert('Upload gagal', resCdn?.message || 'Logo belum tersimpan.', 'error'); setIsProcessingStartup(false); return; }
+      }
+      const payload = {
       ...showStartupModal.item,
       name: fd.get('name'),
       website: fd.get('website'),
       ig: fd.get('ig'),
+      tiktok: fd.get('tiktok'),
+      linkedin: fd.get('linkedin'),
       logoUrl: logoUrl
     };
 
@@ -531,7 +531,7 @@ const MemberManagementView: React.FC<MemberManagementViewProps> = ({ userRole, s
                   <div className="flex items-center justify-between mb-8">
                     <div>
                       <h3 className="text-3xl font-black text-slate-900 tracking-tight">Bulk Edit Detail User</h3>
-                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-2">{selectedMemberKeys.length} member dipilih · field kosong tidak diubah</p>
+                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-2">{selectedMemberKeys.length} member dipilih Â· field kosong tidak diubah</p>
                     </div>
                     <button type="button" onClick={() => setShowBulkEdit(false)} className="p-3 bg-slate-50 text-slate-400 rounded-xl hover:text-red-500"><X size={24} /></button>
                   </div>
@@ -574,14 +574,14 @@ const MemberManagementView: React.FC<MemberManagementViewProps> = ({ userRole, s
                     <form onSubmit={prepareInternshipBulkPreview} className="space-y-6">
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <select required value={internshipBulkDraft.startupId} onChange={e => setInternshipBulkDraft({ ...internshipBulkDraft, startupId: e.target.value })} className="px-5 py-4 bg-slate-50 rounded-2xl font-bold outline-none"><option value="">Startup tempat magang *</option>{startups.map(startup => <option key={startup.id} value={startup.id}>{startup.name}</option>)}</select>
-                        <select value={internshipBulkDraft.academicSupervisorNip} onChange={e => setInternshipBulkDraft({ ...internshipBulkDraft, academicSupervisorNip: e.target.value })} className="px-5 py-4 bg-slate-50 rounded-2xl font-bold outline-none"><option value="">Pembimbing akademik 1</option>{lecturers.map(lecturer => <option key={lecturer.studentId} value={lecturer.studentId}>{lecturer.name} — {lecturer.studentId}</option>)}</select>
-                        <select value={internshipBulkDraft.academicSupervisor2Nip} onChange={e => setInternshipBulkDraft({ ...internshipBulkDraft, academicSupervisor2Nip: e.target.value })} className="px-5 py-4 bg-slate-50 rounded-2xl font-bold outline-none"><option value="">Pembimbing akademik 2 (opsional)</option>{lecturers.map(lecturer => <option key={lecturer.studentId} value={lecturer.studentId}>{lecturer.name} — {lecturer.studentId}</option>)}</select>
+                        <select value={internshipBulkDraft.academicSupervisorNip} onChange={e => setInternshipBulkDraft({ ...internshipBulkDraft, academicSupervisorNip: e.target.value })} className="px-5 py-4 bg-slate-50 rounded-2xl font-bold outline-none"><option value="">Pembimbing akademik 1</option>{lecturers.map(lecturer => <option key={lecturer.studentId} value={lecturer.studentId}>{lecturer.name} â€” {lecturer.studentId}</option>)}</select>
+                        <select value={internshipBulkDraft.academicSupervisor2Nip} onChange={e => setInternshipBulkDraft({ ...internshipBulkDraft, academicSupervisor2Nip: e.target.value })} className="px-5 py-4 bg-slate-50 rounded-2xl font-bold outline-none"><option value="">Pembimbing akademik 2 (opsional)</option>{lecturers.map(lecturer => <option key={lecturer.studentId} value={lecturer.studentId}>{lecturer.name} â€” {lecturer.studentId}</option>)}</select>
                         <input required type="date" value={internshipBulkDraft.startDate} onChange={e => setInternshipBulkDraft({ ...internshipBulkDraft, startDate: e.target.value })} className="px-5 py-4 bg-slate-50 rounded-2xl font-bold outline-none" />
                         <input required type="date" value={internshipBulkDraft.endDate} min={internshipBulkDraft.startDate} onChange={e => setInternshipBulkDraft({ ...internshipBulkDraft, endDate: e.target.value })} className="px-5 py-4 bg-slate-50 rounded-2xl font-bold outline-none" />
                         <input value={internshipBulkDraft.fieldSupervisor} onChange={e => setInternshipBulkDraft({ ...internshipBulkDraft, fieldSupervisor: e.target.value })} placeholder="Pembimbing lapangan" className="px-5 py-4 bg-slate-50 rounded-2xl font-bold outline-none" />
                         <select value={internshipBulkDraft.status} onChange={e => setInternshipBulkDraft({ ...internshipBulkDraft, status: e.target.value as typeof internshipBulkDraft.status })} className="px-5 py-4 bg-slate-50 rounded-2xl font-bold outline-none"><option value="PLANNED">Akan Magang</option><option value="ONGOING">Sedang Magang</option><option value="COMPLETED">Selesai</option><option value="CANCELLED">Dibatalkan</option></select>
                       </div>
-                      <div className="rounded-2xl bg-slate-50 p-5 space-y-2 max-h-48 overflow-auto">{selectedStudentMembers().map(member => <div key={member.studentId} className="font-bold text-sm text-slate-700">✓ {member.name} <span className="font-mono text-xs text-slate-400">{member.studentId}</span></div>)}</div>
+                      <div className="rounded-2xl bg-slate-50 p-5 space-y-2 max-h-48 overflow-auto">{selectedStudentMembers().map(member => <div key={member.studentId} className="font-bold text-sm text-slate-700">âœ“ {member.name} <span className="font-mono text-xs text-slate-400">{member.studentId}</span></div>)}</div>
                       <button type="submit" className="w-full py-5 bg-orange-600 text-white rounded-2xl font-black uppercase tracking-widest">Lanjut Preview</button>
                     </form>
                   ) : (
@@ -703,13 +703,13 @@ const MemberManagementView: React.FC<MemberManagementViewProps> = ({ userRole, s
                         </span>
                       </td>}
                       {activeTab === 'LECTURER' && <td className="px-10 py-6">
-                        <span className="px-3 py-1.5 rounded-xl text-[11px] font-black bg-indigo-50 text-indigo-600 border border-indigo-100">{m.supervisionCount || 0} Mahasiswa</span>
+                        <span className="inline-flex whitespace-nowrap px-3 py-1.5 rounded-xl text-[11px] font-black bg-indigo-50 text-indigo-600 border border-indigo-100">{m.supervisionCount || 0} Mahasiswa</span>
                       </td>}
-                      <td className="px-10 py-6"><span className={`px-3 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-widest inline-flex border ${Number(m.workload?.activeLoad || 0) >= 3 ? 'bg-red-50 text-red-600 border-red-100' : Number(m.workload?.activeLoad || 0) === 2 ? 'bg-amber-50 text-amber-600 border-amber-100' : Number(m.workload?.activeLoad || 0) === 1 ? 'bg-emerald-50 text-emerald-600 border-emerald-100' : 'bg-slate-50 text-slate-400 border-slate-100'}`}>{m.workload?.activeLoad || 0} · {Number(m.workload?.activeLoad || 0) >= 3 ? 'TINGGI' : Number(m.workload?.activeLoad || 0) === 2 ? 'SEDANG' : Number(m.workload?.activeLoad || 0) === 1 ? 'RINGAN' : 'KOSONG'}</span></td>
+                      <td className="px-10 py-6"><span className={`px-3 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-widest inline-flex border ${Number(m.workload?.activeLoad || 0) >= 3 ? 'bg-red-50 text-red-600 border-red-100' : Number(m.workload?.activeLoad || 0) === 2 ? 'bg-amber-50 text-amber-600 border-amber-100' : Number(m.workload?.activeLoad || 0) === 1 ? 'bg-emerald-50 text-emerald-600 border-emerald-100' : 'bg-slate-50 text-slate-400 border-slate-100'}`}>{m.workload?.activeLoad || 0} • {Number(m.workload?.activeLoad || 0) >= 3 ? 'TINGGI' : Number(m.workload?.activeLoad || 0) === 2 ? 'SEDANG' : Number(m.workload?.activeLoad || 0) === 1 ? 'RINGAN' : 'KOSONG'}</span></td>
                       <td className="px-10 py-6">
                          <span className={`flex items-center gap-2 text-[10px] font-black uppercase tracking-widest ${isAccountActive ? 'text-emerald-600' : 'text-slate-400'}`}>
                             {isAccountActive ? <CheckCircle2 size={14}/> : <Lock size={14}/>}
-                            {m.isActive ? 'Active' : 'Inactive'} · {m.isApproved ? 'Approved' : 'Pending'}
+                            {m.isActive ? 'Active' : 'Inactive'} • {m.isApproved ? 'Approved' : 'Pending'}
                          </span>
                       </td>
                       <td className="px-10 py-6">
@@ -743,7 +743,7 @@ const MemberManagementView: React.FC<MemberManagementViewProps> = ({ userRole, s
                  <div className="flex items-center gap-3 text-[10px] font-black text-slate-400 uppercase tracking-widest mb-10">
                     <Users size={14} className="text-orange-600" /> {students.filter(m => m.studentType === 'STARTUP' && m.startupId === s.id).length} Members
                  </div>
-                 <details className="mb-6"><summary className="cursor-pointer font-bold text-sm">Struktur Tim</summary><div className="mt-4 space-y-4">{STARTUP_POSITIONS.map(position => <section key={position}><h5 className="text-xs font-black uppercase text-slate-500">{STARTUP_POSITION_LABELS[position]}</h5><ul className="mt-1 text-sm text-slate-800">{students.filter(m => m.studentType === 'STARTUP' && m.startupId === s.id && m.startupPosition === position).map(m => <li key={m.studentId}>{m.name}</li>)}{!students.some(m => m.studentType === 'STARTUP' && m.startupId === s.id && m.startupPosition === position) && <li className="text-slate-400">Belum diisi</li>}</ul></section>)}</div></details>
+                 <button onClick={() => setShowTeamModal(s)} className="text-sm font-bold text-slate-700 hover:text-orange-600 mb-6 w-full text-left flex items-center justify-between border-b border-slate-100 pb-2">Lihat Struktur Tim <ArrowRight size={16} /></button>
                  <div className="flex gap-2">
                     <button onClick={() => { setStartupLogoPreview(s.logoUrl || null); setShowStartupModal({ isOpen: true, mode: 'edit', item: s }); }} className="flex-1 py-3.5 bg-white text-slate-900 border border-slate-200 rounded-xl font-black text-[9px] uppercase tracking-widest flex items-center justify-center gap-2 hover:bg-slate-50 transition-all shadow-sm">Edit</button>
                     <button onClick={() => {
@@ -947,7 +947,7 @@ const MemberManagementView: React.FC<MemberManagementViewProps> = ({ userRole, s
 
       {showStartupModal.isOpen && (
         <div className="fixed inset-0 z-[150] bg-slate-900/60 backdrop-blur-md flex items-center justify-center p-6">
-          <div className="bg-white w-full max-w-lg rounded-[3rem] shadow-2xl p-10 lg:p-12 animate-in zoom-in-95 duration-300">
+          <div className="bg-white w-full max-w-lg max-h-[92vh] overflow-y-auto rounded-[3rem] shadow-2xl p-10 lg:p-12 animate-in zoom-in-95 duration-300">
              <div className="flex items-center justify-between mb-8">
                 <div>
                    <h3 className="text-2xl font-black text-slate-900 tracking-tight">{showStartupModal.mode === 'add' ? 'New Startup' : 'Startup Identity'}</h3>
@@ -976,14 +976,22 @@ const MemberManagementView: React.FC<MemberManagementViewProps> = ({ userRole, s
                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-2">Team Identifier</label>
                      <input name="name" defaultValue={showStartupModal.item?.name} required placeholder="Startup Narrative Name" className="w-full px-6 py-4 bg-slate-50 rounded-2xl font-bold outline-none focus:border-orange-400" />
                    </div>
-                   <div className="grid grid-cols-2 gap-5">
+                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
                       <div className="space-y-1">
                         <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-2">Official Website</label>
                         <input name="website" defaultValue={showStartupModal.item?.website} placeholder="HTTPS://" className="w-full px-5 py-4 bg-slate-50 rounded-2xl font-bold outline-none text-xs" />
                       </div>
                       <div className="space-y-1">
-                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-2">Social Hub</label>
-                        <input name="ig" defaultValue={showStartupModal.item?.ig} placeholder="@Handle" className="w-full px-5 py-4 bg-slate-50 rounded-2xl font-bold outline-none text-xs" />
+                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-2">Instagram</label>
+                        <input name="ig" defaultValue={showStartupModal.item?.ig} placeholder="@Handle atau URL" className="w-full px-5 py-4 bg-slate-50 rounded-2xl font-bold outline-none text-xs" />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-2">TikTok</label>
+                        <input name="tiktok" defaultValue={showStartupModal.item?.tiktok} placeholder="@Handle atau URL" className="w-full px-5 py-4 bg-slate-50 rounded-2xl font-bold outline-none text-xs" />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-2">LinkedIn</label>
+                        <input name="linkedin" defaultValue={showStartupModal.item?.linkedin} placeholder="URL profil atau perusahaan" className="w-full px-5 py-4 bg-slate-50 rounded-2xl font-bold outline-none text-xs" />
                       </div>
                    </div>
                 </div>
@@ -1092,8 +1100,36 @@ const MemberManagementView: React.FC<MemberManagementViewProps> = ({ userRole, s
           </div>
         </div>
       )}
+
+        {showTeamModal && (
+          <div className="fixed inset-0 z-[150] bg-slate-900/60 backdrop-blur-md flex items-center justify-center p-6 overflow-y-auto" onClick={() => setShowTeamModal(null)}>
+            <div className="bg-white w-full max-w-md rounded-[3rem] shadow-2xl p-10 animate-in zoom-in-95 duration-300 my-auto" onClick={e => e.stopPropagation()}>
+              <div className="flex items-center justify-between mb-8">
+                <div>
+                  <h3 className="text-2xl font-black tracking-tighter text-slate-900">Struktur Tim</h3>
+                  <p className="text-sm font-medium text-slate-400 mt-1">{showTeamModal.name}</p>
+                </div>
+                <button onClick={() => setShowTeamModal(null)} className="w-12 h-12 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center hover:bg-slate-200 transition-colors"><X size={20} /></button>
+              </div>
+              <div className="space-y-4 max-h-[50vh] overflow-y-auto pr-2 custom-scrollbar">
+                {STARTUP_POSITIONS.map(position => (
+                  <section key={position}>
+                    <h5 className="text-xs font-black uppercase text-slate-500">{STARTUP_POSITION_LABELS[position]}</h5>
+                    <ul className="mt-1 text-sm text-slate-800">
+                      {students.filter(m => m.studentType === 'STARTUP' && m.startupId === showTeamModal.id && m.startupPosition === position).map(m => <li key={m.studentId} className="flex items-center gap-2 before:content-['•'] before:text-slate-300">{m.name}</li>)}
+                      {!students.some(m => m.studentType === 'STARTUP' && m.startupId === showTeamModal.id && m.startupPosition === position) && <li className="text-slate-400 text-xs italic mt-1">Belum diisi</li>}
+                    </ul>
+                  </section>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
     </div>
   );
 };
 
 export default MemberManagementView;
+
+
+

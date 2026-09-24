@@ -162,13 +162,25 @@ router.get('/workloads/:id', async (req, res, next) => {
 router.get('/startups', async (_req, res, next) => {
   try {
     const [rows] = await db.execute(`
-      SELECT t.id,t.name,t.logo,t.website,s.nim,s.name AS student_name,s.startup_position
+      SELECT t.id,t.name,t.logo,t.website,t.ig,t.tiktok,t.linkedin,s.nim,s.name AS student_name,s.startup_position
       FROM startup_teams t LEFT JOIN students s ON s.startup_id=t.id AND s.type='STARTUP'
       ORDER BY t.name,s.startup_position,s.name`);
     const startups = [];
     for (const row of rows) {
       let startup = startups.find(item => item.id === row.id);
-      if (!startup) { startup = { id: row.id, name: row.name, logoUrl: row.logo, website: row.website, members: [] }; startups.push(startup); }
+      if (!startup) {
+        startup = {
+          id: row.id,
+          name: row.name,
+          logoUrl: row.logo,
+          website: row.website,
+          ig: row.ig,
+          tiktok: row.tiktok,
+          linkedin: row.linkedin,
+          members: []
+        };
+        startups.push(startup);
+      }
       if (row.nim) startup.members.push({ nim: row.nim, name: row.student_name, position: row.startup_position || 'MEMBER' });
     }
     res.set('Cache-Control', 'no-store').json(startups);

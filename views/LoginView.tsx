@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+﻿import React, { useState } from 'react';
 import { UserRole, AppAssets } from '../types';
 import { Shield, ArrowRight, User, BookOpen, Lock, Terminal, UserPlus, Fingerprint, Loader2 } from 'lucide-react';
 
@@ -59,11 +59,11 @@ const LoginView: React.FC<LoginViewProps> = ({ onLogin, onAdminLogin, onRegister
         </div>
         
         <div className="relative z-10 flex flex-col items-center text-center max-w-md animate-in fade-in slide-in-from-left-8 duration-1000">
-           <div className={`w-32 h-32 rounded-[2.5rem] flex items-center justify-center text-white shadow-2xl transition-all duration-500 group hover:scale-110 ${isAdminMode ? 'bg-red-600 shadow-red-600/40' : 'bg-orange-600 shadow-orange-600/40'}`}>
+           <div className="w-32 h-32 rounded-[2.5rem] flex items-center justify-center transition-all duration-500 group hover:scale-110 drop-shadow-2xl overflow-hidden">
               {assets.logoUrl ? (
-                <img src={assets.logoUrl} className="w-full h-full object-contain p-6" alt="Logo" />
+                <img src={assets.logoUrl} className="w-full h-full object-cover" alt="Logo" />
               ) : (
-                <span className="text-6xl font-black">{isAdminMode ? 'A' : 'K'}</span>
+                <img src="https://i.imgur.com/EGH7u4a.png" className="w-full h-full object-cover" alt="Portal Ko+Lab" />
               )}
            </div>
            <h1 className="text-6xl font-black text-white tracking-tighter mb-6 leading-none">
@@ -128,7 +128,7 @@ const LoginView: React.FC<LoginViewProps> = ({ onLogin, onAdminLogin, onRegister
                        value={name}
                        onChange={(e) => setName(e.target.value)}
                        className="w-full pl-14 pr-8 py-5 bg-slate-50 border border-transparent rounded-[1.5rem] focus:bg-white focus:ring-4 focus:ring-orange-100 outline-none transition-all font-bold text-slate-800 disabled:opacity-50" 
-                       placeholder="Enter full name..."
+                       placeholder="••••••••"
                      />
                   </div>
                 </div>
@@ -172,7 +172,7 @@ const LoginView: React.FC<LoginViewProps> = ({ onLogin, onAdminLogin, onRegister
 
               <div className="group">
                 <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-2">
-                  {isAdminMode ? 'System Token' : 'Access Token (Password)'}
+                  {isAdminMode ? 'Kata Sandi Admin' : 'Kata Sandi'}
                 </label>
                 <div className="relative">
                    <div className={`absolute inset-y-0 left-6 flex items-center text-slate-300 transition-colors ${isAdminMode ? 'group-focus-within:text-red-600' : 'group-focus-within:text-orange-600'}`}>
@@ -184,7 +184,7 @@ const LoginView: React.FC<LoginViewProps> = ({ onLogin, onAdminLogin, onRegister
                      value={password}
                      onChange={(e) => setPassword(e.target.value)}
                      className={`w-full pl-14 pr-8 py-5 bg-slate-50 border border-transparent rounded-[1.5rem] focus:bg-white focus:ring-4 outline-none transition-all font-bold text-slate-800 ${isAdminMode ? 'focus:ring-red-100' : 'focus:ring-orange-100'} disabled:opacity-50`} 
-                     placeholder="••••••••"
+                     placeholder="Masukkan kata sandi Anda"
                    />
                 </div>
               </div>

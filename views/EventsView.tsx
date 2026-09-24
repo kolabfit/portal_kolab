@@ -1,4 +1,4 @@
-
+﻿
 import React, { useState, useMemo, useEffect } from 'react';
 import { 
   Calendar as CalendarIcon, Plus, Search, Edit2, 
@@ -131,11 +131,14 @@ const EventsView: React.FC<EventsViewProps> = ({ events, isAdmin, currentUser, u
     const eventId = editingItem?.id || `evt-${Date.now()}`;
     let finalImageUrl = editingItem?.image || '';
     if (imagePreview && imagePreview.startsWith('data:')) {
-      const res = await api.uploadFile(imagePreview, `${eventId}.png`, editingItem?.image, 'asetweb');
-      if (res?.status === 'success') finalImageUrl = res.url;
-      else { onShowAlert('Upload gagal', res?.message || 'Gambar belum tersimpan.', 'error'); setIsProcessing(false); return; }
-    }
-    const payload = {
+        const resF = await fetch(imagePreview);
+        const blob = await resF.blob();
+        const file = new File([blob], `${eventId}.png`, { type: 'image/png' });
+        const resCdn = await api.uploadFileCdn(file, 'EVENT', eventId, 'public');
+        if (resCdn?.status === 'success') finalImageUrl = resCdn.asset?.deliveryUrl || resCdn.asset?.url || '';
+        else { onShowAlert('Upload gagal', resCdn?.message || 'Gambar belum tersimpan.', 'error'); setIsProcessing(false); return; }
+      }
+      const payload = {
       title: fd.get('title'), date: fd.get('date'), time: fd.get('time'), image: finalImageUrl,
       description: fd.get('description'), locationOffline: isOnlineMode ? '' : fd.get('locationOffline'),
       locationOnline: isOnlineMode ? 'Yes' : 'No', maxParticipants: Number(fd.get('maxParticipants')),
@@ -392,3 +395,6 @@ const EventsView: React.FC<EventsViewProps> = ({ events, isAdmin, currentUser, u
 };
 
 export default EventsView;
+
+
+

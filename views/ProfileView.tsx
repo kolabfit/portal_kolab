@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { UserCircle, Layers, Camera, Upload, Loader2, Briefcase, User, CheckCircle2, Building2, Youtube, Music, Radio, Save } from 'lucide-react';
 import { UserProfile, UserRole, StudentJobDesk, LecturerJobDesk, StartupTeam } from '../types';
 import CameraCapture from '../components/CameraCapture';
+import RetryImage from '../components/RetryImage';
 
 interface ProfileViewProps {
   profile: UserProfile;
@@ -19,14 +20,20 @@ const ProfileView: React.FC<ProfileViewProps> = ({ profile, setProfile, startups
   const [showCamera, setShowCamera] = useState<'avatar' | 'photoIdCard' | null>(null);
   const [isUploading, setIsUploading] = useState<string | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [imageErrors, setImageErrors] = useState({ avatar: false, photoIdCard: false });
+  useEffect(() => { setImageErrors(errors => ({ ...errors, avatar: false })); }, [profile.avatar]);
+  useEffect(() => { setImageErrors(errors => ({ ...errors, photoIdCard: false })); }, [profile.photoIdCard]);
 
   const triggerUpload = async (e: React.ChangeEvent<HTMLInputElement>, type: 'avatar' | 'photoIdCard') => {
     const file = e.target.files?.[0];
     if (file) {
       setIsUploading(type);
-      const url = await onFileUpload(file, profile[type], 'folderppid');
-      if (url) setProfile({ ...profile, [type]: url });
-      setIsUploading(null);
+      try {
+        const url = await onFileUpload(file, profile[type], 'folderppid');
+        if (url) setProfile({ ...profile, [type]: url });
+      } finally {
+        setIsUploading(null);
+      }
     }
   };
 
@@ -35,9 +42,12 @@ const ProfileView: React.FC<ProfileViewProps> = ({ profile, setProfile, startups
     const blob = await res.blob();
     const file = new File([blob], `${type}-${Date.now()}.png`, { type: 'image/png' });
     setIsUploading(type);
-    const url = await onFileUpload(file, profile[type], 'folderppid');
-    if (url) setProfile({ ...profile, [type]: url });
-    setIsUploading(null);
+    try {
+      const url = await onFileUpload(file, profile[type], 'folderppid');
+      if (url) setProfile({ ...profile, [type]: url });
+    } finally {
+      setIsUploading(null);
+    }
   };
 
   const toggleLecturerJob = (job: LecturerJobDesk) => {
@@ -79,8 +89,10 @@ const ProfileView: React.FC<ProfileViewProps> = ({ profile, setProfile, startups
               <div className="relative group w-48 h-48 rounded-full border-[10px] border-white shadow-2xl bg-white overflow-hidden">
                 {isUploading === 'avatar' ? (
                   <div className="w-full h-full flex items-center justify-center bg-slate-50"><Loader2 className="animate-spin text-orange-600" /></div>
+                ) : imageErrors.avatar ? (
+                    <p role="alert" className="p-5 text-center text-xs text-red-600">Foto gagal dimuat. Muat ulang halaman untuk mencoba kembali.</p>
                 ) : profile.avatar ? (
-                    <img src={profile.avatar} className="w-full h-full object-cover" alt="avatar" />
+                    <RetryImage src={profile.avatar} onError={() => setImageErrors(errors => ({ ...errors, avatar: true }))} className="w-full h-full object-cover" alt="avatar" />
                 ) : (
                     <UserCircle size={42} className="text-slate-300" />
                 )}
@@ -99,8 +111,10 @@ const ProfileView: React.FC<ProfileViewProps> = ({ profile, setProfile, startups
               <div className="relative group w-32 h-44 rounded-2xl border-[6px] border-white shadow-xl bg-slate-50 overflow-hidden flex items-center justify-center">
                 {isUploading === 'photoIdCard' ? (
                   <Loader2 className="animate-spin text-orange-600" />
+                ) : imageErrors.photoIdCard ? (
+                  <p role="alert" className="p-3 text-center text-xs text-red-600">Foto gagal dimuat. Muat ulang halaman untuk mencoba kembali.</p>
                 ) : profile.photoIdCard ? (
-                  <img src={profile.photoIdCard} className="w-full h-full object-cover" alt="ID Scan" />
+                  <RetryImage src={profile.photoIdCard} onError={() => setImageErrors(errors => ({ ...errors, photoIdCard: true }))} className="w-full h-full object-cover" alt="ID Scan" />
                 ) : (
                   <div className="text-slate-300 flex flex-col items-center"><User size={40} /></div>
                 )}

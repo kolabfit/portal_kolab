@@ -75,6 +75,14 @@ const StreamingView: React.FC<StreamingViewProps> = ({ profile, assets, setProfi
     try {
       // Logic Spotify
       if (finalUrl.includes('spotify.com')) {
+        const spotifyUrl = new URL(finalUrl);
+        if (spotifyUrl.hostname === 'open.spotify.com') {
+          const path = spotifyUrl.pathname.replace(/^\/embed/, '');
+          finalUrl = `https://open.spotify.com/embed${path}`;
+          // Spotify's player does not need share/tracking parameters.
+          spotifyUrl.search = '';
+          finalUrl += '?utm_source=generator';
+        }
         if (!finalUrl.includes('/embed')) {
           // Ganti link share standar menjadi link embed
           finalUrl = finalUrl.replace('open.spotify.com/', 'open.spotify.com/embed/');
@@ -112,6 +120,8 @@ const StreamingView: React.FC<StreamingViewProps> = ({ profile, assets, setProfi
     return (
       <iframe 
         src={finalUrl} 
+        title={finalUrl.includes('spotify.com') ? 'Spotify player' : 'Multimedia player'}
+        referrerPolicy="strict-origin-when-cross-origin"
         className="absolute inset-0 w-full h-full border-none bg-black shadow-2xl" 
         allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture" 
         loading="lazy"
