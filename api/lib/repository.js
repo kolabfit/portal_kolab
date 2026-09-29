@@ -22,7 +22,7 @@ export async function listRepository(user, all = false, apiOrigin = process.env.
   if (all && user.role !== 'ADMIN') fail('Akses admin diperlukan.', 403);
   const cdnSync = await syncRepositoryCdn();
   const [rows] = await db.execute(`SELECT r.* FROM repo r WHERE NOT EXISTS
-    (SELECT 1 FROM cdn_assets a WHERE a.cdn_file_id=r.cdn_asset_id AND a.deleted_at IS NOT NULL)
+    (SELECT 1 FROM cdn_assets a WHERE a.cdn_file_id COLLATE utf8mb4_unicode_ci = r.cdn_asset_id COLLATE utf8mb4_unicode_ci AND a.deleted_at IS NOT NULL)
     ${all ? '' : 'AND r.owner_id=? AND r.role=?'} ORDER BY r.date DESC`, all ? [] : [user.id, user.role]);
   const items = rows.map(row => {
     const item = repoItem(row);
@@ -58,7 +58,7 @@ export async function repositoryAction(req) {
       const max = Number(account.custom_max_upload ?? policy.maxUploadSize ?? 20971520);
       if (upload && size > max) fail('Ukuran file melebihi batas upload.');
       if (Array.isArray(policy.allowedCategories) && !policy.allowedCategories.includes(cat)) fail('Kategori file tidak diizinkan.');
-      const [[usage]] = await conn.execute("SELECT COALESCE(SUM(size),0) AS used FROM repo r WHERE owner_id=? AND role=? AND type='FILE' AND NOT EXISTS (SELECT 1 FROM cdn_assets a WHERE a.cdn_file_id=r.cdn_asset_id AND a.deleted_at IS NOT NULL)", [user.id, user.role]);
+      const [[usage]] = await conn.execute("SELECT COALESCE(SUM(size),0) AS used FROM repo r WHERE owner_id=? AND role=? AND type='FILE' AND NOT EXISTS (SELECT 1 FROM cdn_assets a WHERE a.cdn_file_id COLLATE utf8mb4_unicode_ci = r.cdn_asset_id COLLATE utf8mb4_unicode_ci AND a.deleted_at IS NOT NULL)", [user.id, user.role]);
       if (Number(usage.used) + size > quota) fail('Kuota penyimpanan tidak cukup.');
     }
     async function item(id) {
