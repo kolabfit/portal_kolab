@@ -18,11 +18,25 @@ import { fileURLToPath } from 'url';
 import fs from 'node:fs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-export const TEMPLATE_DIR = path.resolve(__dirname, '../../../template_surat');
+/**
+ * Folder template surat. Urutan: env LETTER_TEMPLATE_DIR, lalu api/template_surat (di dalam proyek,
+ * ikut ter-deploy), lalu ../../../template_surat (susunan lokal lama: sejajar folder repo).
+ * Folder yang belum ada TIDAK menghentikan server: login dan API lain tetap jalan, hanya
+ * pembuatan surat yang gagal (lihat getTemplatePath).
+ */
+function resolveTemplateDir() {
+  const candidates = [
+    process.env.LETTER_TEMPLATE_DIR && path.resolve(process.env.LETTER_TEMPLATE_DIR),
+    path.resolve(__dirname, '../template_surat'),
+    path.resolve(__dirname, '../../../template_surat'),
+  ].filter(Boolean);
+  return candidates.find((dir) => fs.existsSync(dir)) || candidates[0];
+}
 
-/** Verifikasi template dir tersedia saat load */
+export const TEMPLATE_DIR = resolveTemplateDir();
+
 if (!fs.existsSync(TEMPLATE_DIR)) {
-  throw new Error(`[LetterRegistry] Template directory not found: ${TEMPLATE_DIR}`);
+  console.warn(`[LetterRegistry] Template directory not found: ${TEMPLATE_DIR} (set LETTER_TEMPLATE_DIR or add api/template_surat). Pembuatan surat dinonaktifkan sampai folder tersedia.`);
 }
 
 /**
@@ -140,7 +154,7 @@ export function getTemplatePath(def) {
   const safe = path.basename(def.filename);
   const fullPath = path.join(TEMPLATE_DIR, safe);
   if (!fs.existsSync(fullPath)) {
-    throw new Error(`Template tidak ditemukan: ${safe}`);
+    throw new Error(`Template tidak ditemukan: ${safe} (folder: ${TEMPLATE_DIR})`);
   }
   return fullPath;
 }

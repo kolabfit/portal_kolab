@@ -7,11 +7,10 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'url';
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
+import { TEMPLATE_DIR } from '../letterRegistry.js';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const TEMPLATE_PATH = path.resolve(__dirname, '../../../../template_surat/Sertifikat idspora_3.pdf');
+const TEMPLATE_FILE = 'Sertifikat idspora_3.pdf';
 
 /**
  * @param {object} data   - Resolved data dari letterResolver (student, startup)
@@ -19,6 +18,7 @@ const TEMPLATE_PATH = path.resolve(__dirname, '../../../../template_surat/Sertif
  * @returns {Promise<Buffer>} - PDF buffer
  */
 export async function renderSuratSertifikat(data, manual) {
+  const TEMPLATE_PATH = path.join(TEMPLATE_DIR, TEMPLATE_FILE);
   if (!fs.existsSync(TEMPLATE_PATH)) {
     throw new Error(`Template Sertifikat tidak ditemukan di: ${TEMPLATE_PATH}`);
   }
