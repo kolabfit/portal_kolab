@@ -1,4 +1,4 @@
-﻿
+
 import React, { useState, useMemo } from 'react';
 import { 
   Info, Plus, Search, Trash2, Edit2, X, Save, 
@@ -148,9 +148,9 @@ const InformasiView: React.FC<InformasiViewProps> = ({
 
   return (
     <div className="space-y-10 animate-in fade-in duration-500 pb-20">
-      <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-8">
+      <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-6 sm:gap-8">
         <div>
-          <h2 className="text-5xl font-black text-slate-900 tracking-tighter">Informasi</h2>
+          <h2 className="text-3xl sm:text-4xl lg:text-5xl font-black text-slate-900 tracking-tighter">Informasi</h2>
           <p className="text-slate-500 font-bold text-xs uppercase tracking-widest mt-2">Targeted ecosystem information & updates</p>
         </div>
         <div className="flex flex-wrap gap-4">
@@ -173,11 +173,11 @@ const InformasiView: React.FC<InformasiViewProps> = ({
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 sm:gap-8">
         {filtered.map(info => {
           const canManage = isAdmin || (info.author === currentUser);
           return (
-            <div key={info.id} onClick={() => setSelectedInfo(info)} className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm hover:shadow-2xl transition-all duration-500 group cursor-pointer flex flex-col justify-between">
+            <div key={info.id} onClick={() => setSelectedInfo(info)} className="bg-white p-6 sm:p-8 lg:p-10 rounded-[2rem] sm:rounded-[3rem] border border-slate-100 shadow-sm hover:shadow-2xl transition-all duration-500 group cursor-pointer flex flex-col justify-between">
               <div>
                 <div className="flex justify-between items-start mb-8">
                     <div className="w-14 h-14 bg-orange-50 rounded-2xl flex items-center justify-center text-orange-600 group-hover:bg-slate-900 group-hover:text-white transition-all">

@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Portal Asset API — Gateway for all file operations via Kroombox CDN
  *
  * Routes:
@@ -168,9 +168,19 @@ router.get('/:id', requireSession, async (req, res) => {
 
 // ─── GET /api/assets/:id/access ─────────────────────────────────────────────
 router.get('/:id/access', async (req, res, next) => {
-  // Published article attachments are public, like the article itself. Drafts
-  // and all other asset types retain the existing session/permission checks.
   try {
+    const [[asset]] = await db.execute(
+      'SELECT id, cdn_file_id, cdn_delivery_url, is_private FROM cdn_assets WHERE id=? AND deleted_at IS NULL',
+      [req.params.id]
+    );
+
+    // Asset publik (is_private=false) dapat diakses langsung oleh tag <img> tanpa header sesi
+    if (asset && !asset.is_private && asset.cdn_file_id) {
+      const deliveryUrl = asset.cdn_delivery_url || cdn.getDeliveryUrl(asset.cdn_file_id);
+      return res.redirect(cdn.resolveDeliveryUrl(deliveryUrl));
+    }
+
+    // Published article attachments are public, like the article itself.
     const [[published]] = await db.execute(`SELECT a.cdn_file_id FROM cdn_assets a
       JOIN article_attachments att ON att.file_id=a.id
       JOIN articles article ON article.id=att.article_id
@@ -179,6 +189,7 @@ router.get('/:id/access', async (req, res, next) => {
       res.set('Cache-Control', 'private, no-store');
       return res.redirect(await cdn.createSignedUrl(published.cdn_file_id, 900));
     }
+
     return requireSession(req, res, next);
   } catch (error) { next(error); }
 }, async (req, res) => {

@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Storage configuration for Portal Ko+Lab
  * Centralizes file validation rules per feature type.
  */
@@ -60,6 +60,12 @@ export const FILE_VALIDATION = {
     maxSize: 5 * 1024 * 1024,
     isPrivate: false
   },
+  MITRA_LOGO: {
+    allowedMimes: ['image/jpeg', 'image/png', 'image/webp', 'image/svg+xml'],
+    allowedExtensions: ['jpg', 'jpeg', 'png', 'webp', 'svg'],
+    maxSize: 5 * 1024 * 1024,
+    isPrivate: false
+  },
   EVENT_IMAGE: {
     allowedMimes: ['image/jpeg', 'image/png', 'image/webp'],
     allowedExtensions: ['jpg', 'jpeg', 'png', 'webp'],
@@ -76,6 +82,12 @@ export const FILE_VALIDATION = {
     allowedMimes: ['image/jpeg', 'image/png', 'image/webp'],
     allowedExtensions: ['jpg', 'jpeg', 'png', 'webp'],
     maxSize: 10 * 1024 * 1024,
+    isPrivate: false
+  },
+  LETTER_SIGNATURE: {
+    allowedMimes: ['image/jpeg', 'image/png', 'image/webp'],
+    allowedExtensions: ['jpg', 'jpeg', 'png', 'webp'],
+    maxSize: 5 * 1024 * 1024,
     isPrivate: false
   },
   OTHER: {

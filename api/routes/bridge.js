@@ -1,4 +1,4 @@
-﻿import express from 'express';
+import express from 'express';
 import pool from '../lib/db.js';
 import axios from 'axios';
 import crypto from 'node:crypto';
@@ -492,8 +492,10 @@ router.post('/', requireSession, async (req, res) => {
     }
   } catch (error) {
     if (db) await db.rollback();
-    if (!error.status) console.error(`Bridge action [${action}] failed:`, error);
-    return res.status(error.status || 500).json({ status: 'error', message: error.message, ...(error.field ? { error: error.error, field: error.field } : {}) });
+    const status = error.status || 500;
+    const isDev = process.env.NODE_ENV === 'development';
+    const message = status < 500 ? error.message : (isDev ? error.message : 'Terjadi kesalahan saat memproses permintaan.');
+    return res.status(status).json({ status: 'error', message, ...(error.field ? { error: error.error, field: error.field } : {}) });
   } finally { if (db) { await db.rollback(); db.release(); } }
 });
 

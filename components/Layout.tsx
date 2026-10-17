@@ -1,8 +1,8 @@
-﻿
+
 import React, { useState, useEffect } from 'react';
 import { 
   LayoutDashboard, UserCircle, Calendar, Flag, Info, Megaphone,
-  Settings, LogOut, Menu, Bell, Users, FolderOpen, Database, X, Clock, FileText, Radio, Tags
+  Settings, LogOut, Menu, Bell, Users, FolderOpen, Database, X, Clock, FileText, Radio, Tags, Building2, FileStack
 } from 'lucide-react';
 import { AppNotification, UserRole } from '../types';
 import { api } from '../api';
@@ -33,6 +33,8 @@ const Layout: React.FC<LayoutProps> = ({ children, activeTab, setActiveTab, user
     { id: 'dashboard', label: 'Overview', icon: LayoutDashboard },
     { id: 'profile', label: 'Account', icon: UserCircle },
     ...(userRole === UserRole.STUDENT ? [{ id: 'student-status', label: 'Status Saya', icon: UserCircle }] : []),
+    { id: 'mitra', label: 'Mitra Ko+Lab', icon: Building2 },
+    { id: 'surat-administrasi', label: 'Surat Administrasi', icon: FileStack },
     { id: 'repo', label: 'Mainframe Repo', icon: FolderOpen },
     { id: 'streaming', label: 'Streaming Hub', icon: Radio },
     { id: 'informasi', label: 'Informasi', icon: Info },
@@ -125,7 +127,7 @@ const Layout: React.FC<LayoutProps> = ({ children, activeTab, setActiveTab, user
       </aside>
 
       <div className="flex-1 flex flex-col min-h-screen relative min-w-0">
-        <header className="h-20 bg-white/70 backdrop-blur-xl border-b border-slate-100 flex items-center justify-between px-5 lg:px-10 sticky top-0 z-[40]">
+        <header className="h-16 sm:h-20 bg-white/70 backdrop-blur-xl border-b border-slate-100 flex items-center justify-between px-3.5 sm:px-6 lg:px-10 sticky top-0 z-[40]">
           <div className="flex items-center gap-3">
             <button onClick={() => setIsSidebarOpen(true)} className="p-2.5 text-slate-600 lg:hidden rounded-xl bg-white border border-slate-100 shadow-sm"><Menu size={22} /></button>
             <div className="lg:hidden w-10 h-10 flex items-center justify-center rounded-lg overflow-hidden shadow-md bg-slate-900"><img src={logo || "https://i.imgur.com/EGH7u4a.png"} className="w-full h-full object-contain p-0.5 drop-shadow-md" alt="Portal Ko+Lab" /></div>
@@ -140,7 +142,7 @@ const Layout: React.FC<LayoutProps> = ({ children, activeTab, setActiveTab, user
               {showNotifications && (
                 <>
                   <div className="fixed inset-0 z-10" onClick={() => setShowNotifications(false)}></div>
-                  <div className="absolute right-0 mt-4 w-[calc(100vw-40px)] sm:w-96 bg-white rounded-[2rem] shadow-2xl border border-slate-100 z-20 overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+                  <div className="absolute right-0 mt-4 w-[calc(100vw-32px)] sm:w-96 bg-white rounded-[2rem] shadow-2xl border border-slate-100 z-20 overflow-hidden animate-in fade-in zoom-in-95 duration-200">
                     <div className="p-6 bg-slate-50 border-b border-slate-100 flex items-center justify-between">
                        <h4 className="text-xs font-black uppercase tracking-widest text-slate-900">Pusat Informasi</h4>
                        <button onClick={() => setShowNotifications(false)} className="p-1 text-slate-400 hover:text-slate-900"><X size={16} /></button>
@@ -170,13 +172,13 @@ const Layout: React.FC<LayoutProps> = ({ children, activeTab, setActiveTab, user
             </div>
             <div className="h-8 w-px bg-slate-100 mx-1"></div>
             <div className="flex flex-col items-end">
-               <span className="text-[11px] lg:text-xs font-black text-slate-900 leading-none truncate max-w-[100px] lg:max-w-none">{userName}</span>
+               <span className="text-[11px] lg:text-xs font-black text-slate-900 leading-none truncate max-w-[100px] sm:max-w-[160px] lg:max-w-none">{userName}</span>
                <span className="text-[8px] lg:text-[9px] font-bold text-slate-400 uppercase tracking-widest mt-1">{userRole}</span>
             </div>
           </div>
         </header>
         <main className="flex-1 overflow-x-hidden">
-          <div className="max-w-7xl mx-auto p-5 lg:p-10">{children}</div>
+          <div className="max-w-7xl mx-auto p-3.5 sm:p-6 lg:p-8 xl:p-10">{children}</div>
         </main>
       </div>
     </div>

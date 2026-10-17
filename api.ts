@@ -1,4 +1,4 @@
-﻿import type { StudentMemberOverview } from './types';
+import type { StudentMemberOverview } from './types';
 /**
  * PORTAL KOLAB API GATEWAY
  * Version: 3.0.0 - Node.js & MySQL Implementation
@@ -310,6 +310,61 @@ export const api = {
       console.error('AI generation failed:', error);
       return { status: 'error', message: error instanceof Error ? error.message : 'AI error' };
     }
+  },
+
+  /**
+   * Mitra Ko+Lab APIs
+   */
+  async getMitras(search?: string) {
+    const url = new URL(`${API_BASE_URL}/mitra`);
+    if (search) url.searchParams.append('search', search);
+    const response = await fetch(url.toString(), {
+      headers: this.getToken() ? { Authorization: 'Bearer ' + this.getToken() } : {}
+    });
+    if (!response.ok) throw new Error('Data mitra gagal dimuat.');
+    return response.json();
+  },
+  async getMitra(id: string) {
+    const response = await fetch(`${API_BASE_URL}/mitra/${id}`, {
+      headers: this.getToken() ? { Authorization: 'Bearer ' + this.getToken() } : {}
+    });
+    if (!response.ok) throw new Error('Mitra tidak ditemukan.');
+    return response.json();
+  },
+  async createMitra(data: any) {
+    const response = await fetch(`${API_BASE_URL}/mitra`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(this.getToken() ? { Authorization: 'Bearer ' + this.getToken() } : {})
+      },
+      body: JSON.stringify(data)
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.message || 'Gagal menambahkan mitra.');
+    return result;
+  },
+  async updateMitra(id: string, data: any) {
+    const response = await fetch(`${API_BASE_URL}/mitra/${id}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(this.getToken() ? { Authorization: 'Bearer ' + this.getToken() } : {})
+      },
+      body: JSON.stringify(data)
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.message || 'Gagal mengubah mitra.');
+    return result;
+  },
+  async deleteMitra(id: string) {
+    const response = await fetch(`${API_BASE_URL}/mitra/${id}`, {
+      method: 'DELETE',
+      headers: this.getToken() ? { Authorization: 'Bearer ' + this.getToken() } : {}
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.message || 'Gagal menghapus mitra.');
+    return result;
   }
 };
 

@@ -1,4 +1,4 @@
-﻿import { migrateStartupPosition } from '../lib/startupPosition.js';
+import { migrateStartupPosition } from '../lib/startupPosition.js';
 import db from '../lib/db.js';
 import { internshipsSchema } from '../lib/internships.js';
 
@@ -62,8 +62,24 @@ export async function migrate() {
   for (const [column, type] of Object.entries({ name: 'VARCHAR(100)', email: 'VARCHAR(100)', avatar: 'TEXT', photo_id: 'TEXT' })) {
     if (!columns.some(c => c.Field === column)) await db.query(`ALTER TABLE admins ADD COLUMN ${column} ${type}`);
   }
-}
 
+  // Mitra Ko+Lab
+  await db.execute(`CREATE TABLE IF NOT EXISTS mitras (
+    id VARCHAR(50) PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    address TEXT,
+    phone VARCHAR(30),
+    description TEXT,
+    head_name VARCHAR(100),
+    logo TEXT,
+    website TEXT,
+    members TEXT,
+    apps TEXT,
+    created_by VARCHAR(100),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_mitras_name (name)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci`);
 
   // CDN Asset Metadata table
   await db.execute(`CREATE TABLE IF NOT EXISTS cdn_assets (
@@ -102,9 +118,9 @@ export async function migrate() {
     await db.query("ALTER TABLE article_attachments ADD COLUMN cdn_asset_id VARCHAR(50) NULL");
     await db.query("ALTER TABLE article_attachments ADD COLUMN storage_provider VARCHAR(30) DEFAULT 'LEGACY'");
   }
+}
 
 if (process.argv[1]?.replaceAll('\\', '/').endsWith('/scripts/migrate.js')) {
   try { await migrate(); console.log('MySQL persistence migration completed. Existing records preserved.'); }
   finally { await db.end(); }
 }
-

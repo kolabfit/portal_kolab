@@ -280,3 +280,29 @@ export interface StudentMemberOverview {
  workload: { activeLoad: number; totalHistory: number; categoryLoad: Record<StudentWorkloadCategory, number>;
  active: StudentWorkloadSummary[]; history: StudentWorkloadSummary[]; planned: StudentWorkloadSummary[] };
 }
+
+export interface MitraMember {
+  name: string;
+  role: string;
+}
+
+export interface MitraApp {
+  name: string;
+  url: string;
+}
+
+export interface Mitra {
+  id: string;
+  name: string;
+  address: string;
+  phone: string;
+  description: string;
+  headName: string;
+  logo: string;
+  website: string;
+  members: MitraMember[];
+  apps: MitraApp[];
+  createdBy: string;
+  createdAt?: string;
+  updatedAt?: string;
+}

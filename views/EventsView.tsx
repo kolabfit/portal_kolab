@@ -1,4 +1,4 @@
-﻿
+
 import React, { useState, useMemo, useEffect } from 'react';
 import { 
   Calendar as CalendarIcon, Plus, Search, Edit2, 
@@ -273,8 +273,8 @@ const EventsView: React.FC<EventsViewProps> = ({ events, isAdmin, currentUser, u
 
   return (
     <div className="space-y-10 animate-in fade-in duration-500 pb-20">
-      <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-8">
-        <div><h2 className="text-5xl font-black text-slate-900 tracking-tighter">Events</h2><p className="text-slate-500 font-bold text-xs uppercase tracking-widest mt-2">Flagship events & Workshops Hub</p></div>
+      <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-6 sm:gap-8">
+        <div><h2 className="text-3xl sm:text-4xl lg:text-5xl font-black text-slate-900 tracking-tighter">Events</h2><p className="text-slate-500 font-bold text-xs uppercase tracking-widest mt-2">Flagship events & Workshops Hub</p></div>
         <div className="flex flex-wrap gap-4">
           
           <div className="relative w-full md:w-48 group">

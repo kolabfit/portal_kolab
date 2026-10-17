@@ -32,3 +32,21 @@ api/.env.*
 !api/.env.example
 test-results/
 playwright-report/
+
+# Database dumps with user data (schema.sql is retained for DDL)
+portal_kolab.sql
+*.sql.gz
+
+# Local dev scripts & test artifacts
+api/reset-admin.js
+api/check-passwords.js
+api/check-db.js
+api/test_db*.cjs
+api/audit-*.js
+api/test-*.js
+api/inspect-*.js
+api/extract-docx.js
+api/scratch/
+*.pdf
+Archive.zip
+template_surat.zip

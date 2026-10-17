@@ -1,4 +1,4 @@
-﻿import { STARTUP_POSITIONS, STARTUP_POSITION_LABELS, startupPositionLabel } from '../startupPositions';
+import { STARTUP_POSITIONS, STARTUP_POSITION_LABELS, startupPositionLabel } from '../startupPositions';
 import StartupPositionSelect from '../components/StartupPositionSelect';
 import type { StartupPosition } from '../types';
 
@@ -493,14 +493,14 @@ const MemberManagementView: React.FC<MemberManagementViewProps> = ({ userRole, s
 
   return (
     <div className="space-y-12 animate-in fade-in duration-700 pb-20">
-      <div className="flex flex-col md:flex-row md:items-end justify-between gap-8">
+      <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 sm:gap-8">
         <div>
-          <h2 className="text-5xl font-black text-slate-900 tracking-tighter">Management User</h2>
-          <div className="flex flex-wrap gap-4 mt-6">
-            <button onClick={() => setActiveView('members')} className={`px-8 py-3 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all ${activeView === 'members' ? 'bg-slate-900 text-white shadow-xl' : 'bg-white text-slate-400 border border-slate-100'}`}>User Directory</button>
-            <button onClick={() => setActiveView('startups')} className={`px-8 py-3 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all ${activeView === 'startups' ? 'bg-orange-600 text-white shadow-xl' : 'bg-white text-slate-400 border border-slate-100'}`}>Startup Cluster</button>
-            {userRole === UserRole.ADMIN && <button onClick={() => setActiveView('internships')} className={`px-8 py-3 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all ${activeView === 'internships' ? 'bg-orange-600 text-white shadow-xl' : 'bg-white text-slate-400 border border-slate-100'}`}>Kelola Magang</button>}
-            {userRole === UserRole.ADMIN && <button onClick={() => setActiveView('workloads')} className={`px-8 py-3 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all ${activeView === 'workloads' ? 'bg-indigo-600 text-white shadow-xl' : 'bg-white text-slate-400 border border-slate-100'}`}>Kelola Workload</button>}
+          <h2 className="text-3xl sm:text-4xl lg:text-5xl font-black text-slate-900 tracking-tighter">Management User</h2>
+          <div className="flex flex-wrap gap-2.5 sm:gap-4 mt-4 sm:mt-6">
+            <button onClick={() => setActiveView('members')} className={`px-4 sm:px-6 lg:px-8 py-2.5 sm:py-3 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all ${activeView === 'members' ? 'bg-slate-900 text-white shadow-xl' : 'bg-white text-slate-400 border border-slate-100'}`}>User Directory</button>
+            <button onClick={() => setActiveView('startups')} className={`px-4 sm:px-6 lg:px-8 py-2.5 sm:py-3 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all ${activeView === 'startups' ? 'bg-orange-600 text-white shadow-xl' : 'bg-white text-slate-400 border border-slate-100'}`}>Startup Cluster</button>
+            {userRole === UserRole.ADMIN && <button onClick={() => setActiveView('internships')} className={`px-4 sm:px-6 lg:px-8 py-2.5 sm:py-3 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all ${activeView === 'internships' ? 'bg-orange-600 text-white shadow-xl' : 'bg-white text-slate-400 border border-slate-100'}`}>Kelola Magang</button>}
+            {userRole === UserRole.ADMIN && <button onClick={() => setActiveView('workloads')} className={`px-4 sm:px-6 lg:px-8 py-2.5 sm:py-3 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all ${activeView === 'workloads' ? 'bg-indigo-600 text-white shadow-xl' : 'bg-white text-slate-400 border border-slate-100'}`}>Kelola Workload</button>}
           </div>
         </div>
         
@@ -607,13 +607,13 @@ const MemberManagementView: React.FC<MemberManagementViewProps> = ({ userRole, s
         </div>}
       </div>
 
-      {activeView === 'internships' ? (userRole === UserRole.ADMIN && <InternshipManagement onShowAlert={onShowAlert} showConfirm={showConfirm} />) : activeView === 'workloads' ? (userRole === UserRole.ADMIN && <WorkloadManagement onShowAlert={onShowAlert} showConfirm={showConfirm} />) : <div className="bg-white rounded-[3rem] border border-slate-100 shadow-sm overflow-hidden min-h-[500px]"> 
+      {activeView === 'internships' ? (userRole === UserRole.ADMIN && <InternshipManagement onShowAlert={onShowAlert} showConfirm={showConfirm} />) : activeView === 'workloads' ? (userRole === UserRole.ADMIN && <WorkloadManagement onShowAlert={onShowAlert} showConfirm={showConfirm} />) : <div className="bg-white rounded-[2rem] sm:rounded-[3rem] border border-slate-100 shadow-sm overflow-hidden min-h-[500px]"> 
         {activeView === 'members' ? (
           <>
-          <div className="px-10 pt-8 flex flex-wrap gap-3 items-center">
-            <button onClick={() => { setTransferMode('import'); setTransferRole(activeTab); }} className="px-5 py-3 bg-orange-50 text-orange-700 rounded-2xl font-black text-[10px] uppercase tracking-widest flex items-center gap-2 hover:bg-orange-100"><Upload size={16} /> Import Data</button>
-            <button onClick={() => { setTransferMode('export'); setTransferRole(activeTab); setTransferFormat('xlsx'); }} className="px-5 py-3 bg-emerald-50 text-emerald-700 rounded-2xl font-black text-[10px] uppercase tracking-widest flex items-center gap-2 hover:bg-emerald-100"><Download size={16} /> Export Data</button>
-            <select aria-label="Pilih aksi bulk" value={bulkAction} onChange={e => setBulkAction(e.target.value as BulkAction | '')} disabled={!selectedMemberKeys.length || isBulkProcessing} className="px-4 py-3 bg-slate-50 border border-slate-100 rounded-2xl font-black text-[10px] uppercase tracking-widest outline-none disabled:opacity-50">
+          <div className="px-4 sm:px-6 lg:px-10 pt-6 sm:pt-8 flex flex-wrap gap-2.5 sm:gap-3 items-center">
+            <button onClick={() => { setTransferMode('import'); setTransferRole(activeTab); }} className="px-4 sm:px-5 py-2.5 sm:py-3 bg-orange-50 text-orange-700 rounded-2xl font-black text-[10px] uppercase tracking-widest flex items-center gap-2 hover:bg-orange-100"><Upload size={16} /> Import Data</button>
+            <button onClick={() => { setTransferMode('export'); setTransferRole(activeTab); setTransferFormat('xlsx'); }} className="px-4 sm:px-5 py-2.5 sm:py-3 bg-emerald-50 text-emerald-700 rounded-2xl font-black text-[10px] uppercase tracking-widest flex items-center gap-2 hover:bg-emerald-100"><Download size={16} /> Export Data</button>
+            <select aria-label="Pilih aksi bulk" value={bulkAction} onChange={e => setBulkAction(e.target.value as BulkAction | '')} disabled={!selectedMemberKeys.length || isBulkProcessing} className="px-3.5 sm:px-4 py-2.5 sm:py-3 bg-slate-50 border border-slate-100 rounded-2xl font-black text-[10px] uppercase tracking-widest outline-none disabled:opacity-50">
               <option value="" disabled>PILIH AKSI...</option>
               <option value="activate">Aktifkan</option>
               <option value="deactivate">Nonaktifkan</option>
@@ -628,15 +628,15 @@ const MemberManagementView: React.FC<MemberManagementViewProps> = ({ userRole, s
               </>}
               <option value="delete">Hapus</option>
             </select>
-            <button onClick={handleBulkAction} disabled={!bulkAction || !selectedMemberKeys.length || isBulkProcessing} className="px-5 py-3 bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest flex items-center gap-2 disabled:opacity-50"><ListChecks size={16} /> {isBulkProcessing ? 'Processing...' : `Bulk Action (${selectedMemberKeys.length})`}</button>
-            <button type="button" onClick={openBulkEdit} disabled={!selectedMemberKeys.length || isBulkProcessing} className="px-5 py-3 bg-indigo-50 text-indigo-700 rounded-2xl font-black text-[10px] uppercase tracking-widest flex items-center gap-2 disabled:opacity-50"><Edit3 size={16} /> Edit Detail Terpilih</button>
+            <button onClick={handleBulkAction} disabled={!bulkAction || !selectedMemberKeys.length || isBulkProcessing} className="px-4 sm:px-5 py-2.5 sm:py-3 bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest flex items-center gap-2 disabled:opacity-50"><ListChecks size={16} /> {isBulkProcessing ? 'Processing...' : `Bulk Action (${selectedMemberKeys.length})`}</button>
+            <button type="button" onClick={openBulkEdit} disabled={!selectedMemberKeys.length || isBulkProcessing} className="px-4 sm:px-5 py-2.5 sm:py-3 bg-indigo-50 text-indigo-700 rounded-2xl font-black text-[10px] uppercase tracking-widest flex items-center gap-2 disabled:opacity-50"><Edit3 size={16} /> Edit Detail Terpilih</button>
           </div>
           
-          <div className="px-10 pt-4 flex gap-2 border-b border-slate-100 mb-4">
-             <button onClick={() => changeDirectoryTab('STUDENT')} className={`px-6 py-3 rounded-t-2xl font-black text-xs transition-all ${activeTab === 'STUDENT' ? 'bg-slate-900 text-white' : 'bg-slate-50 text-slate-400 hover:bg-slate-100'}`}>MAHASISWA {students.length}</button>
-             <button onClick={() => changeDirectoryTab('LECTURER')} className={`px-6 py-3 rounded-t-2xl font-black text-xs transition-all ${activeTab === 'LECTURER' ? 'bg-slate-900 text-white' : 'bg-slate-50 text-slate-400 hover:bg-slate-100'}`}>DOSEN {lecturers.length}</button>
+          <div className="px-4 sm:px-6 lg:px-10 pt-4 flex gap-2 border-b border-slate-100 mb-4 overflow-x-auto">
+             <button onClick={() => changeDirectoryTab('STUDENT')} className={`px-5 sm:px-6 py-2.5 sm:py-3 rounded-t-2xl font-black text-xs transition-all shrink-0 ${activeTab === 'STUDENT' ? 'bg-slate-900 text-white' : 'bg-slate-50 text-slate-400 hover:bg-slate-100'}`}>MAHASISWA {students.length}</button>
+             <button onClick={() => changeDirectoryTab('LECTURER')} className={`px-5 sm:px-6 py-2.5 sm:py-3 rounded-t-2xl font-black text-xs transition-all shrink-0 ${activeTab === 'LECTURER' ? 'bg-slate-900 text-white' : 'bg-slate-50 text-slate-400 hover:bg-slate-100'}`}>DOSEN {lecturers.length}</button>
           </div>
-          {activeTab === 'STUDENT' && <button type="button" onClick={() => { setStudentColumnFilters({ name: '', id: '', startup: '', startupPosition: '', internship: '', workload: '', status: '' }); setStudentSearch(''); setInternshipFilter('ALL'); }} className="mx-6 my-3 text-xs font-bold text-slate-500">Reset filter mahasiswa</button>}
+          {activeTab === 'STUDENT' && <button type="button" onClick={() => { setStudentColumnFilters({ name: '', id: '', startup: '', startupPosition: '', internship: '', workload: '', status: '' }); setStudentSearch(''); setInternshipFilter('ALL'); }} className="mx-4 sm:mx-6 my-2 sm:my-3 text-xs font-bold text-slate-500">Reset filter mahasiswa</button>}
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead>

@@ -78,7 +78,51 @@ function sha256(input) {
   return crypto.createHash('sha256').update(input).digest('hex');
 }
 
+// Rate limiter sederhana untuk mencegah serangan brute-force login (10 percobaan per 5 menit)
+const loginAttempts = new Map();
+const RATE_LIMIT_WINDOW_MS = 5 * 60 * 1000;
+const MAX_ATTEMPTS = 10;
+
+function checkRateLimit(ip) {
+  const now = Date.now();
+  const record = loginAttempts.get(ip);
+  if (!record) return { allowed: true };
+  if (now - record.firstAttempt > RATE_LIMIT_WINDOW_MS) {
+    loginAttempts.delete(ip);
+    return { allowed: true };
+  }
+  if (record.count >= MAX_ATTEMPTS) {
+    const retryAfter = Math.ceil((record.firstAttempt + RATE_LIMIT_WINDOW_MS - now) / 1000);
+    return { allowed: false, retryAfter };
+  }
+  return { allowed: true };
+}
+
+function recordFailedLogin(ip) {
+  const now = Date.now();
+  const record = loginAttempts.get(ip);
+  if (!record || (now - record.firstAttempt > RATE_LIMIT_WINDOW_MS)) {
+    loginAttempts.set(ip, { count: 1, firstAttempt: now });
+  } else {
+    record.count += 1;
+  }
+}
+
+function clearLoginAttempts(ip) {
+  loginAttempts.delete(ip);
+}
+
 router.post('/login', async (req, res) => {
+  const clientIp = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket?.remoteAddress || '127.0.0.1';
+  const limitCheck = checkRateLimit(clientIp);
+  if (!limitCheck.allowed) {
+    res.setHeader('Retry-After', String(limitCheck.retryAfter));
+    return res.status(429).json({
+      status: 'error',
+      message: `Terlalu banyak percobaan login gagal. Silakan coba lagi dalam ${limitCheck.retryAfter} detik.`
+    });
+  }
+
   let { username, password, isAdmin, role, id } = req.body;
   if (typeof password === 'string') password = password.trim();
   if (typeof id === 'string') id = id.trim();
@@ -95,6 +139,7 @@ router.post('/login', async (req, res) => {
         [username, hashed]
       );
       if (rows.length > 0) {
+        clearLoginAttempts(clientIp);
         const admin = rows[0];
         const token = jwt.sign({ username: admin.username, role: 'ADMIN' }, process.env.JWT_SECRET, { expiresIn: '7d' });
         return res.json({
@@ -118,6 +163,7 @@ router.post('/login', async (req, res) => {
       );
 
       if (rows.length > 0) {
+        clearLoginAttempts(clientIp);
         const user = rows[0];
         const token = jwt.sign({ id: user[idField], role }, process.env.JWT_SECRET, { expiresIn: '7d' });
         
@@ -126,10 +172,14 @@ router.post('/login', async (req, res) => {
         return res.json({ status: 'success', profile, token });
       }
     }
+    recordFailedLogin(clientIp);
     return res.status(401).json({ status: 'error', message: 'Identity verification failed.' });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ status: 'error', message: error.message });
+    console.error('[Auth Error]', error);
+    res.status(500).json({
+      status: 'error',
+      message: process.env.NODE_ENV === 'development' ? error.message : 'Terjadi kesalahan sistem saat memproses login.'
+    });
   }
 });
 

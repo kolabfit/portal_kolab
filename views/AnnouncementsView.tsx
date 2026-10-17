@@ -90,17 +90,17 @@ const AnnouncementsView: React.FC<AnnouncementsViewProps> = ({
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500">
-      <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-8 mb-4">
+      <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-6 sm:gap-8 mb-4">
         <div>
-          <h2 className="text-5xl font-black text-slate-900 tracking-tighter">Broadcast</h2>
+          <h2 className="text-3xl sm:text-4xl lg:text-5xl font-black text-slate-900 tracking-tighter">Broadcast</h2>
           <p className="text-slate-500 font-bold text-xs uppercase tracking-widest mt-2">Official Hub Transmission Terminal</p>
         </div>
       </div>
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 items-start">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-10 items-start">
         {isAdmin && (
           <div className="lg:col-span-5 space-y-8">
-            <section className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-2xl relative overflow-hidden">
-              <h2 className="text-2xl font-black text-slate-900 mb-8 flex items-center gap-3 tracking-tight">
+            <section className="bg-white p-6 sm:p-8 lg:p-10 rounded-[2rem] sm:rounded-[3rem] border border-slate-100 shadow-2xl relative overflow-hidden">
+              <h2 className="text-xl sm:text-2xl font-black text-slate-900 mb-6 sm:mb-8 flex items-center gap-3 tracking-tight">
                 <Megaphone size={28} className="text-orange-600" />
                 Terminal
               </h2>

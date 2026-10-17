@@ -50,31 +50,31 @@ const SettingsView: React.FC<SettingsViewProps> = ({ assets, setAssets, onAssetU
   const mbToBytes = (mb: number) => mb * 1024 * 1024;
 
   return (
-    <div className="max-w-6xl mx-auto space-y-12 animate-in fade-in slide-in-from-right-8 duration-500 pb-20">
-      <div className="flex items-center justify-between">
+    <div className="max-w-6xl mx-auto space-y-8 sm:space-y-12 animate-in fade-in slide-in-from-right-8 duration-500 pb-20">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h2 className="text-5xl font-black text-slate-900 tracking-tighter">System</h2>
-          <p className="text-slate-500 font-bold text-[10px] uppercase tracking-[0.3em] mt-2">Global HUB Strategic Terminal</p>
+          <h2 className="text-3xl sm:text-4xl lg:text-5xl font-black text-slate-900 tracking-tighter">System</h2>
+          <p className="text-slate-500 font-bold text-[10px] uppercase tracking-[0.2em] sm:tracking-[0.3em] mt-1.5 sm:mt-2">Global HUB Strategic Terminal</p>
         </div>
-        <div className="bg-amber-100 text-amber-700 px-6 py-3 rounded-2xl flex items-center gap-3 border border-amber-200/50 shadow-sm shadow-amber-100/50">
-           <Shield size={20} className="animate-pulse" />
+        <div className="bg-amber-100 text-amber-700 px-4 sm:px-6 py-2.5 sm:py-3 rounded-2xl flex items-center gap-3 border border-amber-200/50 shadow-sm shadow-amber-100/50 self-start sm:self-auto">
+           <Shield size={18} className="animate-pulse" />
            <span className="text-[10px] font-black uppercase tracking-widest">Root Authority Bridged</span>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-12">
-        <section className="bg-white p-12 rounded-[3.5rem] border border-slate-100 shadow-sm space-y-12">
-           <h3 className="text-2xl font-black text-slate-900 flex items-center gap-4 tracking-tight">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 lg:gap-12">
+        <section className="bg-white p-6 sm:p-8 lg:p-12 rounded-[2rem] sm:rounded-[3rem] lg:rounded-[3.5rem] border border-slate-100 shadow-sm space-y-8 sm:space-y-12">
+           <h3 className="text-xl sm:text-2xl font-black text-slate-900 flex items-center gap-3 sm:gap-4 tracking-tight">
              <Layout className="text-orange-600" /> Branding Strategic
            </h3>
-           <div className="space-y-10">
+           <div className="space-y-8 sm:space-y-10">
               <DropZone 
                 label="HUB Official Logo (Sector: asetweb)" 
                 onFileSelect={(f) => handleFileSelect(f, 'logoUrl')} 
                 currentValue={assets.logoUrl} 
                 isImage 
               />
-              <div className="grid grid-cols-2 gap-6">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
                  <DropZone 
                     label="ID Card Front (Sector: ppid)" 
                     onFileSelect={(f) => handleFileSelect(f, 'bgFront')} 
@@ -121,22 +121,22 @@ const SettingsView: React.FC<SettingsViewProps> = ({ assets, setAssets, onAssetU
            </div>
         </section>
 
-        <section className="bg-white p-12 rounded-[3.5rem] border border-slate-100 shadow-sm space-y-12">
-           <h3 className="text-2xl font-black text-slate-900 flex items-center gap-4 tracking-tight">
+        <section className="bg-white p-6 sm:p-8 lg:p-12 rounded-[2rem] sm:rounded-[3rem] lg:rounded-[3.5rem] border border-slate-100 shadow-sm space-y-8 sm:space-y-12">
+           <h3 className="text-xl sm:text-2xl font-black text-slate-900 flex items-center gap-3 sm:gap-4 tracking-tight">
              <HardDrive className="text-orange-600" /> Storage Cluster Policy
            </h3>
-           <div className="space-y-10">
+           <div className="space-y-8 sm:space-y-10">
               <div className="space-y-6">
                  <div className="flex items-center justify-between px-2">
                     <h4 className="text-[10px] font-black text-orange-600 uppercase tracking-widest">Student Hierarchy Tier</h4>
                     <span className="text-[8px] font-bold text-slate-300">Convert to Bytes Logic</span>
                  </div>
-                 <div className="grid grid-cols-2 gap-4">
-                    <div className="bg-slate-50 p-6 rounded-3xl">
+                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="bg-slate-50 p-5 sm:p-6 rounded-3xl">
                        <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Default Quota (MB)</span>
                        <input type="number" value={bytesToMB(assets.studentPolicy?.defaultQuota || 0)} onChange={e => updatePolicy('studentPolicy', 'defaultQuota', mbToBytes(Number(e.target.value)))} className="w-full bg-transparent border-0 font-black text-lg text-slate-900 mt-1 focus:ring-0" />
                     </div>
-                    <div className="bg-slate-50 p-6 rounded-3xl">
+                    <div className="bg-slate-50 p-5 sm:p-6 rounded-3xl">
                        <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Max File Size (MB)</span>
                        <input type="number" value={bytesToMB(assets.studentPolicy?.maxUploadSize || 0)} onChange={e => updatePolicy('studentPolicy', 'maxUploadSize', mbToBytes(Number(e.target.value)))} className="w-full bg-transparent border-0 font-black text-lg text-slate-900 mt-1 focus:ring-0" />
                     </div>
@@ -155,12 +155,12 @@ const SettingsView: React.FC<SettingsViewProps> = ({ assets, setAssets, onAssetU
                     <h4 className="text-[10px] font-black text-indigo-600 uppercase tracking-widest">Faculty Hierarchy Tier</h4>
                     <span className="text-[8px] font-bold text-slate-300">Convert to Bytes Logic</span>
                  </div>
-                 <div className="grid grid-cols-2 gap-4">
-                    <div className="bg-slate-50 p-6 rounded-3xl">
+                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="bg-slate-50 p-5 sm:p-6 rounded-3xl">
                        <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Default Quota (MB)</span>
                        <input type="number" value={bytesToMB(assets.lecturerPolicy?.defaultQuota || 0)} onChange={e => updatePolicy('lecturerPolicy', 'defaultQuota', mbToBytes(Number(e.target.value)))} className="w-full bg-transparent border-0 font-black text-lg text-slate-900 mt-1 focus:ring-0" />
                     </div>
-                    <div className="bg-slate-50 p-6 rounded-3xl">
+                    <div className="bg-slate-50 p-5 sm:p-6 rounded-3xl">
                        <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Max File Size (MB)</span>
                        <input type="number" value={bytesToMB(assets.lecturerPolicy?.maxUploadSize || 0)} onChange={e => updatePolicy('lecturerPolicy', 'maxUploadSize', mbToBytes(Number(e.target.value)))} className="w-full bg-transparent border-0 font-black text-lg text-slate-900 mt-1 focus:ring-0" />
                     </div>

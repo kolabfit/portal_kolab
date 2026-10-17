@@ -14,7 +14,19 @@ const collections = {
 router.post('/pull', requireSession, async (req, res) => {
   if (req.user.role !== 'ADMIN') return res.status(403).json({ status: 'error', message: 'Akses admin diperlukan.' });
   const gasUrl = req.body.gasUrl || process.env.GAS_URL;
-  if (!gasUrl || !/^https?:\/\//.test(gasUrl)) return res.status(400).json({ status: 'error', message: 'GAS deployment URL is required' });
+  if (!gasUrl) return res.status(400).json({ status: 'error', message: 'GAS deployment URL is required' });
+  try {
+    const parsed = new URL(gasUrl);
+    if (parsed.protocol !== 'https:') {
+      return res.status(400).json({ status: 'error', message: 'GAS URL harus menggunakan protokol HTTPS.' });
+    }
+    const allowedHosts = ['script.google.com', 'script.googleusercontent.com'];
+    if (!allowedHosts.some(h => parsed.hostname === h || parsed.hostname.endsWith('.' + h))) {
+      return res.status(400).json({ status: 'error', message: 'GAS URL harus mengarah ke domain resmi script.google.com.' });
+    }
+  } catch {
+    return res.status(400).json({ status: 'error', message: 'Format GAS URL tidak valid.' });
+  }
   let connection;
   try {
     const fetched = {};

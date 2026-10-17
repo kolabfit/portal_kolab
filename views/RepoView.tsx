@@ -268,9 +268,9 @@ const RepoView: React.FC<RepoViewProps> = ({ profile, onShowAlert, isAdmin, asse
       
       {/* MAIN REPOSITORY WORKSPACE */}
       <div className="flex-1 space-y-10 min-w-0">
-        <div className="flex flex-col md:flex-row items-start justify-between gap-10">
+        <div className="flex flex-col md:flex-row items-start justify-between gap-6 sm:gap-10">
           <div className="flex-1">
-            <h2 className="text-5xl font-black text-slate-900 tracking-tighter leading-none">Repository</h2>
+            <h2 className="text-3xl sm:text-4xl lg:text-5xl font-black text-slate-900 tracking-tighter leading-none">Repository</h2>
             {syncMessage && <p role="status" className="mt-3 text-xs text-slate-500">{syncMessage}</p>}
             <div className="flex items-center gap-3 mt-6 overflow-x-auto pb-2 scrollbar-hide">
                <button onClick={() => { setCurrentFolder('ROOT'); setBreadcrumbs([]); }} className={`p-4 rounded-[1.5rem] transition-all shadow-sm ${currentFolder === 'ROOT' ? 'bg-orange-600 text-white' : 'bg-white border border-slate-100 text-orange-600'}`}><HardDrive size={20}/></button>
@@ -326,8 +326,8 @@ const RepoView: React.FC<RepoViewProps> = ({ profile, onShowAlert, isAdmin, asse
               ))}
             </div>
           ) : (
-            <div className="bg-white rounded-[2.5rem] border border-slate-100 overflow-hidden shadow-sm">
-               <table className="w-full">
+            <div className="bg-white rounded-[2.5rem] border border-slate-100 overflow-x-auto shadow-sm">
+               <table className="w-full min-w-[500px]">
                   <thead className="bg-slate-50/50 border-b border-slate-100">
                      <tr>
                         <th className="px-8 py-5 text-left text-[9px] font-black text-slate-400 uppercase tracking-widest">Descriptor</th>
@@ -416,12 +416,12 @@ const RepoView: React.FC<RepoViewProps> = ({ profile, onShowAlert, isAdmin, asse
       </div>
 
       {/* FLOATING ACTION BAR */}
-      <div className="fixed bottom-10 right-10 flex gap-4 z-40">
+      <div className="fixed bottom-5 right-5 sm:bottom-10 sm:right-10 flex gap-2 sm:gap-4 z-40">
          {clipboard && (
-            <button onClick={() => setShowPasteModal({ item: clipboard.item })} className="w-16 h-16 bg-emerald-600 text-white rounded-full shadow-2xl flex items-center justify-center hover:scale-110 transition-all border-4 border-white animate-bounce"><Clipboard size={24}/></button>
+            <button onClick={() => setShowPasteModal({ item: clipboard.item })} className="w-12 h-12 sm:w-16 sm:h-16 bg-emerald-600 text-white rounded-full shadow-2xl flex items-center justify-center hover:scale-110 transition-all border-2 sm:border-4 border-white animate-bounce"><Clipboard size={20} className="sm:w-6 sm:h-6" /></button>
          )}
-         <button onClick={() => setShowFolderModal(true)} className="w-16 h-16 bg-slate-900 text-white rounded-full shadow-2xl flex items-center justify-center hover:scale-110 transition-all border-4 border-white"><FolderPlus size={24}/></button>
-         <button onClick={() => setShowUploadModal(true)} className="w-16 h-16 bg-orange-600 text-white rounded-full shadow-2xl flex items-center justify-center hover:scale-110 transition-all border-4 border-white"><Upload size={24}/></button>
+         <button onClick={() => setShowFolderModal(true)} className="w-12 h-12 sm:w-16 sm:h-16 bg-slate-900 text-white rounded-full shadow-2xl flex items-center justify-center hover:scale-110 transition-all border-2 sm:border-4 border-white"><FolderPlus size={20} className="sm:w-6 sm:h-6" /></button>
+         <button onClick={() => setShowUploadModal(true)} className="w-12 h-12 sm:w-16 sm:h-16 bg-orange-600 text-white rounded-full shadow-2xl flex items-center justify-center hover:scale-110 transition-all border-2 sm:border-4 border-white"><Upload size={20} className="sm:w-6 sm:h-6" /></button>
       </div>
 
       {/* CONTEXT MENU */}

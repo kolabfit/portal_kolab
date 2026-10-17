@@ -61,34 +61,34 @@ const DashboardView: React.FC<DashboardViewProps> = ({
       {/* HEADER: Responsive Heading with Sync */}
       <div className="flex flex-row items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl lg:text-5xl font-black text-slate-900 tracking-tighter leading-tight">Overview</h1>
-          <p className="text-slate-500 font-bold uppercase text-[9px] lg:text-[10px] tracking-[0.3em] mt-2 flex items-center gap-2">
-            <Activity size={14} className="text-orange-600" />
-            {isAdmin ? 'System Root Authorized' : 'Member Index Active'} • Hub Pulse: Optimum
+          <h1 className="text-2xl sm:text-3xl lg:text-5xl font-black text-slate-900 tracking-tighter leading-tight">Overview</h1>
+          <p className="text-slate-500 font-bold uppercase text-[9px] lg:text-[10px] tracking-[0.2em] sm:tracking-[0.3em] mt-1.5 sm:mt-2 flex items-center gap-2">
+            <Activity size={14} className="text-orange-600 shrink-0" />
+            <span className="truncate">{isAdmin ? 'System Root Authorized' : 'Member Index Active'} • Hub Pulse: Optimum</span>
           </p>
         </div>
         <button 
           onClick={handleRefresh}
-          className="p-3.5 bg-white border border-slate-100 text-slate-400 hover:text-orange-600 rounded-2xl shadow-sm transition-all hover:shadow-md active:scale-95 group"
+          className="p-3 sm:p-3.5 bg-white border border-slate-100 text-slate-400 hover:text-orange-600 rounded-2xl shadow-sm transition-all hover:shadow-md active:scale-95 group shrink-0"
           title="Sync Node"
         >
-          <RefreshCw size={20} className={isSyncing ? 'animate-spin text-orange-600' : 'group-hover:rotate-180 transition-transform duration-500'} />
+          <RefreshCw size={18} className={isSyncing ? 'animate-spin text-orange-600' : 'group-hover:rotate-180 transition-transform duration-500'} />
         </button>
       </div>
 
       {profile.role === UserRole.STUDENT && <StudentStatusSummary state={studentStatus} onOpen={() => setActiveTab('student-status')} />}
       {profile.role === UserRole.LECTURER && lecturerOverview && <div className="space-y-5">
-        <div><h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em]">Monitoring Dosen</h3><p className="text-2xl font-black tracking-tight mt-2">Profil Ko+Lab Saya</p></div>
-        <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+        <div><h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em]">Monitoring Dosen</h3><p className="text-xl sm:text-2xl font-black tracking-tight mt-1 sm:mt-2">Profil Ko+Lab Saya</p></div>
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 sm:gap-4">
           {[
             ['Total Mahasiswa', lecturerOverview.summary.totalStudents],
             ['Bimbingan Saya', lecturerOverview.summary.totalSupervisions],
             ['Bimbingan Aktif', lecturerOverview.summary.activeSupervisions],
             ['Workload PIC', lecturerOverview.summary.workloadsAsPic],
             ['Workload Aktif', lecturerOverview.summary.activeWorkloads]
-          ].map(([label, value]) => <div key={String(label)} className="bg-white rounded-2xl p-5 border border-slate-100 shadow-sm"><p className="text-[9px] font-black uppercase tracking-widest text-slate-400">{label}</p><p className="text-3xl font-black mt-2">{value}</p></div>)}
+          ].map(([label, value]) => <div key={String(label)} className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-100 shadow-sm"><p className="text-[9px] font-black uppercase tracking-widest text-slate-400">{label}</p><p className="text-2xl sm:text-3xl font-black mt-2">{value}</p></div>)}
         </div>
-        <div className="bg-slate-900 text-white rounded-[2rem] p-6 lg:p-8 flex flex-wrap gap-x-10 gap-y-5"><div><p className="text-[9px] uppercase tracking-widest text-slate-400">Nama</p><p className="font-black mt-1">{lecturerOverview.lecturer.name}</p></div><div><p className="text-[9px] uppercase tracking-widest text-slate-400">NIP</p><p className="font-black mt-1">{lecturerOverview.lecturer.nip}</p></div><div><p className="text-[9px] uppercase tracking-widest text-slate-400">Kode Dosen</p><p className="font-black mt-1">{lecturerOverview.lecturer.code || '-'}</p></div><div><p className="text-[9px] uppercase tracking-widest text-slate-400">Status Member</p><p className="font-black mt-1 text-emerald-400">{lecturerOverview.lecturer.isActive ? 'Aktif' : 'Tidak Aktif'}</p></div><div className="flex gap-2 items-end"><button onClick={() => setActiveTab('lecturer-students')} className="px-4 py-2 bg-orange-600 rounded-xl text-[9px] font-black uppercase">Lihat Mahasiswa</button><button onClick={() => setActiveTab('lecturer-supervisions')} className="px-4 py-2 bg-white/10 rounded-xl text-[9px] font-black uppercase">Bimbingan Saya</button></div></div>
+        <div className="bg-slate-900 text-white rounded-[2rem] p-5 sm:p-6 lg:p-8 flex flex-wrap gap-x-6 sm:gap-x-10 gap-y-4 sm:gap-y-5"><div><p className="text-[9px] uppercase tracking-widest text-slate-400">Nama</p><p className="font-black mt-1 text-sm sm:text-base">{lecturerOverview.lecturer.name}</p></div><div><p className="text-[9px] uppercase tracking-widest text-slate-400">NIP</p><p className="font-black mt-1 text-sm sm:text-base">{lecturerOverview.lecturer.nip}</p></div><div><p className="text-[9px] uppercase tracking-widest text-slate-400">Kode Dosen</p><p className="font-black mt-1 text-sm sm:text-base">{lecturerOverview.lecturer.code || '-'}</p></div><div><p className="text-[9px] uppercase tracking-widest text-slate-400">Status Member</p><p className="font-black mt-1 text-emerald-400 text-sm sm:text-base">{lecturerOverview.lecturer.isActive ? 'Aktif' : 'Tidak Aktif'}</p></div><div className="flex gap-2 items-end w-full sm:w-auto"><button onClick={() => setActiveTab('lecturer-students')} className="px-4 py-2 bg-orange-600 rounded-xl text-[9px] font-black uppercase">Lihat Mahasiswa</button><button onClick={() => setActiveTab('lecturer-supervisions')} className="px-4 py-2 bg-white/10 rounded-xl text-[9px] font-black uppercase">Bimbingan Saya</button></div></div>
       </div>}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-10 items-start">
         {/* LEFT COLUMN: IDENTITY */}

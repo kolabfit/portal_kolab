@@ -78,15 +78,15 @@ const ProfileView: React.FC<ProfileViewProps> = ({ profile, setProfile, startups
 
   return (
     <div className="max-w-4xl mx-auto space-y-12 animate-in fade-in duration-500 pb-20">
-      <div className="bg-white rounded-[3rem] border border-slate-100 shadow-xl shadow-slate-200/50 overflow-hidden">
-        <div className="h-48 bg-slate-900 flex items-center justify-center">
-          <h2 className="text-white/10 text-9xl font-black uppercase select-none tracking-tighter">Account</h2>
+      <div className="bg-white rounded-[2rem] sm:rounded-[3rem] border border-slate-100 shadow-xl shadow-slate-200/50 overflow-hidden">
+        <div className="h-36 sm:h-48 bg-slate-900 flex items-center justify-center">
+          <h2 className="text-white/10 text-6xl sm:text-8xl lg:text-9xl font-black uppercase select-none tracking-tighter">Account</h2>
         </div>
 
-        <div className="px-12 pb-16">
-          <div className="relative -mt-24 flex flex-col md:flex-row items-end gap-12 mb-16">
+        <div className="px-5 sm:px-8 lg:px-12 pb-10 sm:pb-16">
+          <div className="relative -mt-16 sm:-mt-24 flex flex-col md:flex-row items-center md:items-end gap-6 sm:gap-12 mb-10 sm:mb-16">
             <div className="flex flex-col items-center gap-4">
-              <div className="relative group w-48 h-48 rounded-full border-[10px] border-white shadow-2xl bg-white overflow-hidden">
+              <div className="relative group w-36 h-36 sm:w-48 sm:h-48 rounded-full border-[6px] sm:border-[10px] border-white shadow-2xl bg-white overflow-hidden">
                 {isUploading === 'avatar' ? (
                   <div className="w-full h-full flex items-center justify-center bg-slate-50"><Loader2 className="animate-spin text-orange-600" /></div>
                 ) : imageErrors.avatar ? (

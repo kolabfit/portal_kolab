@@ -194,12 +194,14 @@ const MeetingsView: React.FC<MeetingsViewProps> = ({ meetings, isAdmin, currentU
       </div>
 
       {viewType === 'month' ? (
-        <div className="bg-white rounded-[2rem] lg:rounded-[3rem] border border-slate-100 shadow-sm overflow-hidden p-4 lg:p-8 animate-in fade-in duration-500">
-          <div className="grid grid-cols-7 border-b border-slate-100 pb-3 mb-3">
-            {dayNames.map(d => <div key={d} className="text-center text-[8px] lg:text-[10px] font-black text-slate-400 uppercase tracking-widest">{d}</div>)}
-          </div>
-          <div className="grid grid-cols-7 border-t border-l border-slate-100 rounded-xl lg:rounded-2xl overflow-hidden">
-            {renderCalendar()}
+        <div className="bg-white rounded-[2rem] lg:rounded-[3rem] border border-slate-100 shadow-sm overflow-x-auto p-3 sm:p-4 lg:p-8 animate-in fade-in duration-500">
+          <div className="min-w-[320px]">
+            <div className="grid grid-cols-7 border-b border-slate-100 pb-3 mb-3">
+              {dayNames.map(d => <div key={d} className="text-center text-[8px] lg:text-[10px] font-black text-slate-400 uppercase tracking-widest">{d}</div>)}
+            </div>
+            <div className="grid grid-cols-7 border-t border-l border-slate-100 rounded-xl lg:rounded-2xl overflow-hidden">
+              {renderCalendar()}
+            </div>
           </div>
         </div>
       ) : (
