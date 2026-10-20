@@ -316,7 +316,8 @@ export const api = {
    * Mitra Ko+Lab APIs
    */
   async getMitras(search?: string) {
-    const url = new URL(`${API_BASE_URL}/mitra`);
+    // API_BASE_URL may be relative (/api); resolve it against the page origin.
+    const url = new URL(`${API_BASE_URL}/mitra`, window.location.origin);
     if (search) url.searchParams.append('search', search);
     const response = await fetch(url.toString(), {
       headers: this.getToken() ? { Authorization: 'Bearer ' + this.getToken() } : {}
