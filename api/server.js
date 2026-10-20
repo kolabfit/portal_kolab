@@ -24,6 +24,7 @@ import lecturerRoutes from './routes/lecturer.js';
 import assetRoutes from './routes/assets.js';
 import mitraRoutes from './routes/mitra.js';
 import lettersRoutes from './routes/letters.js';
+import { migrate } from './scripts/migrate.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -122,8 +123,20 @@ app.use((err, req, res, next) => {
 
 export default app;
 
-if (process.env.NODE_ENV !== 'test') app.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
-  console.log(`Swagger docs available at https://api-portal.kolab.top/api-docs`);
-});
+// The schema migration is additive (CREATE TABLE IF NOT EXISTS, guarded ADD COLUMN), so it runs on every
+// start: a deploy that ships a route for a new table cannot go live without that table (mitras, 2026-10-20).
+const start = async () => {
+  try {
+    await migrate();
+    console.log('[Migrate] Database schema is up to date.');
+  } catch (error) {
+    console.error('[Migrate] Schema migration failed; routes that need new tables will error:', error.message);
+  }
+  app.listen(PORT, () => {
+    console.log(`Server is running on port ${PORT}`);
+    console.log(`Swagger docs available at https://api-portal.kolab.top/api-docs`);
+  });
+};
+
+if (process.env.NODE_ENV !== 'test') start();
 
