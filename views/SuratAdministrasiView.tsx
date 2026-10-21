@@ -8,7 +8,7 @@ import {
   Eye, EyeOff, Layers, Sliders, Layout as LayoutIcon, AlignLeft,
   AlignCenter, AlignRight, AlignJustify, Bold, Italic, Copy,
   RefreshCw, Loader2, Sparkles, AlertCircle, ChevronDown, ChevronUp,
-  Maximize2, Check, Grid, Settings2
+  Maximize2, Minimize2, Check, Grid, Settings2
 } from 'lucide-react';
 import { UserRole, StartupTeam } from '../types';
 import { api } from '../api';
@@ -319,6 +319,22 @@ const SuratAdministrasiView: React.FC<SuratAdministrasiViewProps> = ({ userRole,
   const [isGeneratingPreview, setIsGeneratingPreview] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
   const [lastError, setLastError] = useState<string | null>(null);
+
+  // Fullscreen state
+  const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
+  const [fullscreenTab, setFullscreenTab] = useState<'visual' | 'preview'>('visual');
+  const [fullscreenZoom, setFullscreenZoom] = useState<number>(100);
+
+  // Escape key listener to exit fullscreen
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isFullscreen) {
+        setIsFullscreen(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isFullscreen]);
 
   // Drag and drop state
   const [draggedBlockIndex, setDraggedBlockIndex] = useState<number | null>(null);
@@ -1051,6 +1067,31 @@ const SuratAdministrasiView: React.FC<SuratAdministrasiViewProps> = ({ userRole,
     onShowAlert('Lebar Kolom Diratakan', 'Semua kolom tabel diatur dengan proporsi lebar yang sama rata.', 'success');
   };
 
+  // Update block style by ID (with optional history recording)
+  const updateBlockStyleById = (blockId: string, stylePatch: Partial<DocumentBlock['style']>, recordHistory = false) => {
+    const next = currentBlocks.map(b => {
+      if (b.id === blockId) {
+        return {
+          ...b,
+          style: {
+            ...b.style,
+            ...stylePatch
+          }
+        };
+      }
+      return b;
+    });
+
+    if (recordHistory) {
+      updateBlocks(next);
+    } else {
+      setDocumentBlocks(prev => ({
+        ...prev,
+        [activeDef.id]: next
+      }));
+    }
+  };
+
   const handleStartColResize = (e: React.MouseEvent, blockId: string, colIndex: number) => {
     e.preventDefault();
     e.stopPropagation();
@@ -1058,26 +1099,44 @@ const SuratAdministrasiView: React.FC<SuratAdministrasiViewProps> = ({ userRole,
     const block = currentBlocks.find(b => b.id === blockId);
     if (!block || block.type !== 'tabel_data') return;
 
-    const widths = getBlockColumnWidths(block);
-    const tableEl = (e.target as HTMLElement).closest('table');
+    const initialWidths = getBlockColumnWidths(block);
+    const colCount = initialWidths.length;
+    if (colCount <= 1) return;
+
+    const targetEl = e.currentTarget as HTMLElement;
+    const tableEl = targetEl.closest('table');
     if (!tableEl) return;
-    const tableWidthPx = tableEl.getBoundingClientRect().width;
+
+    const tableRect = tableEl.getBoundingClientRect();
+    const zoomFactor = Math.max(0.2, zoom / 100);
+    const actionColWidthPx = 44 * zoomFactor;
+    const dataTableWidthPx = Math.max(80, tableRect.width - actionColWidthPx);
     const startX = e.clientX;
     let latestWidths = [...initialWidths];
 
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+
     const onMouseMove = (moveEvent: MouseEvent) => {
       const deltaPx = moveEvent.clientX - startX;
-      const deltaPercent = (deltaPx / tableWidthPx) * 100;
+      const deltaPercent = (deltaPx / dataTableWidthPx) * 100;
 
       const nextWidths = [...initialWidths];
-      if (colIndex < nextWidths.length - 1) {
+      if (colIndex < colCount - 1) {
         const totalPair = initialWidths[colIndex] + initialWidths[colIndex + 1];
         const newW1 = Math.max(5, Math.min(totalPair - 5, Math.round(initialWidths[colIndex] + deltaPercent)));
         const newW2 = totalPair - newW1;
         nextWidths[colIndex] = newW1;
         nextWidths[colIndex + 1] = newW2;
       } else {
-        nextWidths[colIndex] = Math.max(5, Math.min(85, Math.round(initialWidths[colIndex] + deltaPercent)));
+        const prevCol = colIndex - 1;
+        if (prevCol >= 0) {
+          const totalPair = initialWidths[prevCol] + initialWidths[colIndex];
+          const newW2 = Math.max(5, Math.min(totalPair - 5, Math.round(initialWidths[colIndex] + deltaPercent)));
+          const newW1 = totalPair - newW2;
+          nextWidths[prevCol] = newW1;
+          nextWidths[colIndex] = newW2;
+        }
       }
 
       latestWidths = nextWidths;
@@ -1085,9 +1144,51 @@ const SuratAdministrasiView: React.FC<SuratAdministrasiViewProps> = ({ userRole,
     };
 
     const onMouseUp = () => {
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
       window.removeEventListener('mousemove', onMouseMove);
       window.removeEventListener('mouseup', onMouseUp);
       updateBlockDataById(blockId, { colWidths: latestWidths }, true);
+    };
+
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+  };
+
+  const handleStartRowResize = (e: React.MouseEvent, blockId: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    const block = currentBlocks.find(b => b.id === blockId);
+    if (!block || block.type !== 'tabel_data') return;
+
+    const initialHeight = Number(block.style.rowHeight || 28);
+    const initialPaddingY = Number(block.style.paddingY ?? 6);
+    const startY = e.clientY;
+    const zoomFactor = Math.max(0.2, zoom / 100);
+    let latestHeight = initialHeight;
+    let latestPaddingY = initialPaddingY;
+
+    document.body.style.cursor = 'row-resize';
+    document.body.style.userSelect = 'none';
+
+    const onMouseMove = (moveEvent: MouseEvent) => {
+      const deltaY = (moveEvent.clientY - startY) / zoomFactor;
+      const nextHeight = Math.max(18, Math.min(100, Math.round(initialHeight + deltaY)));
+      const nextPaddingY = Math.max(2, Math.min(24, Math.round(initialPaddingY + deltaY * 0.2)));
+
+      latestHeight = nextHeight;
+      latestPaddingY = nextPaddingY;
+
+      updateBlockStyleById(blockId, { rowHeight: nextHeight, paddingY: nextPaddingY }, false);
+    };
+
+    const onMouseUp = () => {
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+      updateBlockStyleById(blockId, { rowHeight: latestHeight, paddingY: latestPaddingY }, true);
     };
 
     window.addEventListener('mousemove', onMouseMove);
@@ -1286,6 +1387,272 @@ const SuratAdministrasiView: React.FC<SuratAdministrasiViewProps> = ({ userRole,
       localStorage.removeItem('kolab_deleted_letters');
     } catch (_) {}
     onShowAlert('Template Dipulihkan', 'Semua template surat resmi berhasil dipulihkan ke galeri.', 'success');
+  };
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // HELPER: RENDER CLEAN DOCUMENT BLOCK FOR FULLSCREEN VIEW
+  // ───────────────────────────────────────────────────────────────────────────
+  const renderFullscreenBlock = (block: DocumentBlock) => {
+    switch (block.type) {
+      case 'kop_surat': {
+        const logoUrl = block.data.logoUrl;
+        return (
+          <div
+            key={block.id}
+            className="text-center relative pb-2 select-text"
+            style={{
+              textAlign: block.style.textAlign || 'center',
+              marginTop: `${block.style.marginTop || 0}px`,
+              marginBottom: `${block.style.marginBottom || 0}px`,
+              paddingLeft: `${block.style.paddingX || 8}px`,
+              paddingRight: `${block.style.paddingX || 8}px`
+            }}
+          >
+            <div className="flex items-center justify-center gap-3 mb-1">
+              {logoUrl ? (
+                <img src={logoUrl} alt="Logo" className="w-12 h-12 object-contain shrink-0" />
+              ) : (
+                <div className="w-10 h-10 rounded-xl bg-orange-50 border border-orange-200 flex items-center justify-center text-orange-600 font-black text-xs shrink-0">
+                  Ko+Lab
+                </div>
+              )}
+              <div className="flex-1 max-w-lg">
+                <div
+                  className="font-bold tracking-tight text-slate-900 uppercase"
+                  style={{ fontSize: `${block.style.fontSize || 12}pt` }}
+                >
+                  {block.data.institution || 'RESEARCH ALLIANCE Ko+Lab'}
+                </div>
+                <div className="text-[10px] font-semibold text-slate-700 tracking-wide">
+                  {block.data.faculty || ''}
+                </div>
+              </div>
+            </div>
+            {block.data.address && (
+              <div className="text-[9px] text-slate-500 leading-tight">
+                {block.data.address}
+              </div>
+            )}
+            <div className="mt-2 border-b-2 border-slate-900 border-double pt-1" />
+          </div>
+        );
+      }
+
+      case 'judul_surat': {
+        return (
+          <div
+            key={block.id}
+            className="text-center py-2 select-text"
+            style={{
+              textAlign: block.style.textAlign || 'center',
+              marginTop: `${block.style.marginTop || 0}px`,
+              marginBottom: `${block.style.marginBottom || 0}px`,
+              paddingLeft: `${block.style.paddingX || 8}px`,
+              paddingRight: `${block.style.paddingX || 8}px`
+            }}
+          >
+            <div
+              className="uppercase tracking-wide text-slate-900 underline font-bold"
+              style={{
+                fontSize: `${block.style.fontSize || 13}pt`,
+                fontWeight: block.style.fontWeight || 'bold'
+              }}
+            >
+              {block.data.title || 'SURAT KETERANGAN'}
+            </div>
+            {block.data.nomor && (
+              <div className="text-xs text-slate-600 font-medium mt-0.5">
+                Nomor: {block.data.nomor}
+              </div>
+            )}
+            {(block.data.hal || block.data.lampiran) && (
+              <div className="text-[11px] text-slate-500 flex justify-center gap-4 mt-1 font-medium">
+                {block.data.hal && <span>Hal: {block.data.hal}</span>}
+                {block.data.lampiran && <span>Lampiran: {block.data.lampiran}</span>}
+              </div>
+            )}
+          </div>
+        );
+      }
+
+      case 'paragraf_teks': {
+        return (
+          <div
+            key={block.id}
+            className="my-1.5 select-text"
+            style={{
+              marginTop: `${block.style.marginTop || 0}px`,
+              marginBottom: `${block.style.marginBottom || 0}px`,
+              paddingLeft: `${block.style.paddingX || 8}px`,
+              paddingRight: `${block.style.paddingX || 8}px`
+            }}
+          >
+            <div
+              style={{
+                fontSize: `${block.style.fontSize || 11}pt`,
+                textAlign: block.style.textAlign || 'justify',
+                lineHeight: block.style.lineHeight || 1.6,
+                fontStyle: block.style.fontStyle || 'normal',
+                color: block.style.color || '#0f172a'
+              }}
+              className="whitespace-pre-line text-slate-800"
+            >
+              {block.data.text || ''}
+            </div>
+          </div>
+        );
+      }
+
+      case 'tabel_data': {
+        const colWidths = getBlockColumnWidths(block);
+        const rowPaddingY = block.style.paddingY ?? 6;
+        const rowPaddingX = block.style.paddingX ?? 8;
+        const rowMinHeight = block.style.rowHeight ?? 28;
+
+        return (
+          <div
+            key={block.id}
+            className="my-3 space-y-1 select-text"
+            style={{
+              marginTop: `${block.style.marginTop || 0}px`,
+              marginBottom: `${block.style.marginBottom || 16}px`,
+              paddingLeft: `${block.style.paddingX || 8}px`,
+              paddingRight: `${block.style.paddingX || 8}px`
+            }}
+          >
+            {block.data.tableTitle && (
+              <div className="font-bold text-xs text-slate-800 mb-1">
+                {block.data.tableTitle}
+              </div>
+            )}
+            <div className="border border-slate-300 rounded-sm overflow-x-auto shadow-2xs">
+              <table
+                className="w-full text-left border-collapse"
+                style={{ tableLayout: 'fixed', fontSize: `${block.style.fontSize || 10}pt` }}
+              >
+                <colgroup>
+                  {colWidths.map((w, idx) => (
+                    <col key={idx} style={{ width: `${w}%` }} />
+                  ))}
+                </colgroup>
+                <thead>
+                  <tr className="bg-slate-100 border-b border-slate-300 font-bold text-slate-800">
+                    {(block.data.headers || []).map((h: string, hi: number) => (
+                      <th
+                        key={hi}
+                        className="p-1 border-r border-slate-300 last:border-r-0 text-center font-bold text-slate-800"
+                        style={{
+                          paddingTop: `${Math.max(4, rowPaddingY - 2)}px`,
+                          paddingBottom: `${Math.max(4, rowPaddingY - 2)}px`,
+                          paddingLeft: `${rowPaddingX}px`,
+                          paddingRight: `${rowPaddingX}px`
+                        }}
+                      >
+                        {h}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {(block.data.rows || []).map((row: string[], ri: number) => (
+                    <tr
+                      key={ri}
+                      className="border-b border-slate-200 last:border-b-0"
+                      style={{ height: `${rowMinHeight}px` }}
+                    >
+                      {row.map((cell: string, ci: number) => (
+                        <td
+                          key={ci}
+                          className="p-1 border-r border-slate-200 last:border-r-0 text-slate-700"
+                          style={{
+                            height: `${rowMinHeight}px`,
+                            paddingTop: `${rowPaddingY}px`,
+                            paddingBottom: `${rowPaddingY}px`,
+                            paddingLeft: `${rowPaddingX}px`,
+                            paddingRight: `${rowPaddingX}px`
+                          }}
+                        >
+                          {cell}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        );
+      }
+
+      case 'garis_pembatas': {
+        return (
+          <div
+            key={block.id}
+            className="py-1"
+            style={{
+              marginTop: `${block.style.marginTop || 0}px`,
+              marginBottom: `${block.style.marginBottom || 0}px`
+            }}
+          >
+            <hr
+              style={{
+                borderColor: block.style.borderColor || '#94a3b8',
+                borderTopWidth: `${block.style.borderWidth || 1}px`,
+                borderStyle: block.style.borderStyle || 'solid'
+              }}
+            />
+          </div>
+        );
+      }
+
+      case 'tanda_tangan': {
+        const signatureUrl = block.data.signatureUrl;
+        return (
+          <div
+            key={block.id}
+            className="my-3 select-text"
+            style={{
+              marginTop: `${block.style.marginTop || 0}px`,
+              marginBottom: `${block.style.marginBottom || 0}px`,
+              paddingLeft: `${block.style.paddingX || 8}px`,
+              paddingRight: `${block.style.paddingX || 8}px`
+            }}
+          >
+            <div className="flex justify-end">
+              <div className="w-56 text-center space-y-1">
+                {block.data.cityDate && (
+                  <div className="text-xs text-slate-700">{block.data.cityDate}</div>
+                )}
+                <div className="text-xs font-semibold text-slate-800">
+                  {block.data.salutation || 'Hormat kami,'}
+                </div>
+                <div className="h-16 flex items-center justify-center my-1">
+                  {signatureUrl ? (
+                    <img src={signatureUrl} alt="Tanda Tangan" className="h-14 object-contain" />
+                  ) : (
+                    <div className="text-[10px] text-slate-400 italic">
+                      [Tanda Tangan Resmi]
+                    </div>
+                  )}
+                </div>
+                <div className="font-bold text-xs text-slate-900 underline">
+                  {block.data.name || '(Nama Lengkap)'}
+                </div>
+                {block.data.nip && (
+                  <div className="text-[10px] text-slate-500">NIP/NIDN: {block.data.nip}</div>
+                )}
+                {block.data.role && (
+                  <div className="text-[10px] text-slate-600 font-medium">{block.data.role}</div>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      }
+
+      default:
+        return null;
+    }
   };
 
   // ───────────────────────────────────────────────────────────────────────────
@@ -1696,6 +2063,20 @@ const SuratAdministrasiView: React.FC<SuratAdministrasiViewProps> = ({ userRole,
           >
             <Eye size={14} />
             <span>{editorMode === 'preview' ? 'Kembali ke Editor' : 'Preview PDF'}</span>
+          </button>
+
+          {/* Fullscreen View Button */}
+          <button
+            onClick={() => {
+              setIsFullscreen(true);
+              setFullscreenTab(editorMode === 'preview' ? 'preview' : 'visual');
+              setFullscreenZoom(100);
+            }}
+            className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all shadow-2xs cursor-pointer"
+            title="Lihat Dokumen Hasil Edit Layar Penuh (Fullscreen)"
+          >
+            <Maximize2 size={14} />
+            <span>Fullscreen</span>
           </button>
 
           {/* Batal */}
@@ -3690,6 +4071,205 @@ const SuratAdministrasiView: React.FC<SuratAdministrasiViewProps> = ({ userRole,
           )}
         </div>
       </div>
+
+      {/* ─── FULLSCREEN DOCUMENT PREVIEW MODAL ─── */}
+      {isFullscreen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/95 backdrop-blur-md flex flex-col text-slate-100 animate-in fade-in duration-200">
+          {/* Top Fullscreen Toolbar */}
+          <div className="h-16 px-4 sm:px-6 bg-slate-900/95 border-b border-slate-800 flex items-center justify-between gap-4 shrink-0 shadow-lg">
+            {/* Left: Back Button & Title */}
+            <div className="flex items-center gap-3 sm:gap-4 min-w-0">
+              <button
+                type="button"
+                onClick={() => setIsFullscreen(false)}
+                className="px-4 py-2 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs font-bold flex items-center gap-2 transition-all border border-white/10 shadow-sm hover:scale-[1.02] active:scale-95 cursor-pointer"
+                title="Kembali ke Mode Editor (Tekan Esc)"
+              >
+                <ArrowLeft size={16} />
+                <span>Kembali</span>
+              </button>
+
+              <div className="h-6 w-px bg-slate-800 hidden sm:block" />
+
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <h2 className="text-sm font-black text-white truncate max-w-[180px] sm:max-w-md">
+                    {activeDef.title}
+                  </h2>
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-orange-600/30 text-orange-400 border border-orange-500/30">
+                    Fullscreen
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-400 truncate">
+                  {currentPagesCount} Halaman • {paperOrientation === 'landscape' ? 'Lanskap' : 'Potret'} (A4)
+                </p>
+              </div>
+            </div>
+
+            {/* Center: Mode Switcher & Zoom */}
+            <div className="flex items-center gap-3">
+              {/* Mode Toggle */}
+              <div className="flex items-center bg-slate-800/80 p-1 rounded-xl border border-slate-700/60 text-xs">
+                <button
+                  type="button"
+                  onClick={() => setFullscreenTab('visual')}
+                  className={`px-3 py-1.5 rounded-lg font-bold transition-all cursor-pointer ${
+                    fullscreenTab === 'visual'
+                      ? 'bg-orange-600 text-white shadow-xs'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  Tampilan Surat
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!previewUrl) handleGeneratePdfPreview();
+                    setFullscreenTab('preview');
+                  }}
+                  className={`px-3 py-1.5 rounded-lg font-bold transition-all cursor-pointer ${
+                    fullscreenTab === 'preview'
+                      ? 'bg-orange-600 text-white shadow-xs'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  Pratinjau PDF
+                </button>
+              </div>
+
+              {/* Zoom Controls (Active in visual mode) */}
+              {fullscreenTab === 'visual' && (
+                <div className="hidden md:flex items-center bg-slate-800/80 px-2 py-1 rounded-xl border border-slate-700/60 text-xs gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setFullscreenZoom(z => Math.max(50, z - 10))}
+                    className="p-1 text-slate-400 hover:text-white rounded hover:bg-slate-700 transition-colors cursor-pointer"
+                    title="Perkecil"
+                  >
+                    <ZoomOut size={14} />
+                  </button>
+                  <span className="font-mono px-1.5 text-xs text-slate-300 min-w-[45px] text-center font-bold">
+                    {fullscreenZoom}%
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setFullscreenZoom(z => Math.min(160, z + 10))}
+                    className="p-1 text-slate-400 hover:text-white rounded hover:bg-slate-700 transition-colors cursor-pointer"
+                    title="Perbesar"
+                  >
+                    <ZoomIn size={14} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFullscreenZoom(100)}
+                    className="px-2 py-0.5 text-[10px] text-slate-400 hover:text-white rounded hover:bg-slate-700 font-bold ml-1 transition-colors cursor-pointer"
+                    title="Skala Asli 100%"
+                  >
+                    100%
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFullscreenZoom(85)}
+                    className="px-2 py-0.5 text-[10px] text-slate-400 hover:text-white rounded hover:bg-slate-700 font-bold transition-colors cursor-pointer"
+                    title="Sesuaikan Ukuran Layar"
+                  >
+                    Pas Layar
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Right: Download & Exit */}
+            <div className="flex items-center gap-2">
+              {isLecturerOrAdmin && (
+                <button
+                  type="button"
+                  onClick={handleDownloadPdf}
+                  disabled={isDownloading}
+                  className="px-3.5 py-2 bg-orange-600 hover:bg-orange-500 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-md shadow-orange-600/30 transition-all cursor-pointer disabled:opacity-50"
+                  title="Unduh PDF Resmi"
+                >
+                  {isDownloading ? (
+                    <Loader2 size={14} className="animate-spin" />
+                  ) : (
+                    <Printer size={14} />
+                  )}
+                  <span className="hidden sm:inline">Cetak Dokumen</span>
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={() => setIsFullscreen(false)}
+                className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
+                title="Keluar Fullscreen (Esc)"
+              >
+                <Minimize2 size={18} />
+              </button>
+            </div>
+          </div>
+
+          {/* Fullscreen Body View */}
+          <div className="flex-1 overflow-auto p-4 sm:p-8 flex justify-center items-start">
+            {fullscreenTab === 'visual' ? (
+              <div className="flex flex-col items-center gap-8 py-4">
+                {Array.from({ length: currentPagesCount }, (_, idx) => idx + 1).map((pageNum) => {
+                  const pageBlocks = currentBlocks.filter(b => (b.pageNumber || 1) === pageNum);
+
+                  return (
+                    <div key={`fs-page-${pageNum}`} className="flex flex-col items-center gap-2">
+                      <div
+                        style={{
+                          width: paperOrientation === 'landscape' ? `${842 * (fullscreenZoom / 100)}px` : `${595 * (fullscreenZoom / 100)}px`
+                        }}
+                        className="flex items-center justify-between px-2 text-xs text-slate-400 font-medium"
+                      >
+                        <span>Halaman {pageNum} dari {currentPagesCount}</span>
+                        <span className="text-[11px] text-slate-500 font-mono">A4 • 210 × 297 mm</span>
+                      </div>
+
+                      {/* Clean Paper Sheet */}
+                      <div
+                        style={{
+                          transform: `scale(${fullscreenZoom / 100})`,
+                          transformOrigin: 'top center',
+                          width: paperOrientation === 'landscape' ? '842px' : '595px',
+                          minHeight: paperOrientation === 'landscape' ? '595px' : '842px'
+                        }}
+                        className="bg-white rounded-sm shadow-2xl p-10 relative text-slate-900 border border-slate-300/40 pointer-events-auto"
+                      >
+                        {/* Render document blocks cleanly */}
+                        {pageBlocks.length === 0 ? (
+                          <div className="h-64 flex items-center justify-center text-slate-300 italic text-sm">
+                            Halaman {pageNum} kosong.
+                          </div>
+                        ) : (
+                          pageBlocks.map((block) => renderFullscreenBlock(block))
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="w-full max-w-5xl h-full min-h-[600px] flex items-center justify-center">
+                {previewUrl ? (
+                  <iframe
+                    src={`${previewUrl}#toolbar=0&navpanes=0&scrollbar=0`}
+                    className="w-full h-full min-h-[calc(100vh-120px)] rounded-xl shadow-2xl border border-slate-700"
+                    title="PDF Fullscreen Live Preview"
+                  />
+                ) : (
+                  <div className="p-12 text-center">
+                    <Loader2 size={36} className="animate-spin text-orange-500 mx-auto mb-3" />
+                    <p className="text-sm font-bold text-slate-300">Memuat Pratinjau Dokumen PDF Resmi...</p>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 };
