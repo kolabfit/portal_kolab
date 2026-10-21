@@ -34,7 +34,7 @@ const Layout: React.FC<LayoutProps> = ({ children, activeTab, setActiveTab, user
     { id: 'profile', label: 'Account', icon: UserCircle },
     ...(userRole === UserRole.STUDENT ? [{ id: 'student-status', label: 'Status Saya', icon: UserCircle }] : []),
     { id: 'mitra', label: 'Mitra Ko+Lab', icon: Building2 },
-    { id: 'surat-administrasi', label: 'Surat Administrasi', icon: FileStack },
+    ...(userRole !== UserRole.STUDENT ? [{ id: 'surat-administrasi', label: 'Surat Administrasi', icon: FileStack }] : []),
     { id: 'repo', label: 'Mainframe Repo', icon: FolderOpen },
     { id: 'streaming', label: 'Streaming Hub', icon: Radio },
     { id: 'informasi', label: 'Informasi', icon: Info },

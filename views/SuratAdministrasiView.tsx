@@ -1656,6 +1656,25 @@ const SuratAdministrasiView: React.FC<SuratAdministrasiViewProps> = ({ userRole,
   };
 
   // ───────────────────────────────────────────────────────────────────────────
+  // ACCESS GUARD: MAHASISWA (STUDENT) DILARANG MENGAKSES SURAT ADMINISTRASI
+  // ───────────────────────────────────────────────────────────────────────────
+  if (userRole === UserRole.STUDENT || !isLecturerOrAdmin) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[460px] bg-white rounded-3xl border border-slate-200/80 p-8 text-center space-y-4 shadow-sm animate-in fade-in duration-200">
+        <div className="w-16 h-16 rounded-2xl bg-red-50 text-red-600 flex items-center justify-center shadow-inner">
+          <AlertCircle size={32} />
+        </div>
+        <div className="space-y-1.5">
+          <h3 className="text-lg font-black text-slate-900 tracking-tight">Akses Terbatas</h3>
+          <p className="text-xs text-slate-500 max-w-md leading-relaxed">
+            Halaman Surat Administrasi hanya dapat diakses oleh Dosen (Lecturer) dan Administrator. Mahasiswa (Student) tidak diizinkan mengakses fitur surat administrasi.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  // ───────────────────────────────────────────────────────────────────────────
   // VIEW 1: GALERI CARD TEMPLATE SURAT
   // ───────────────────────────────────────────────────────────────────────────
   if (currentView === 'gallery') {

@@ -6,9 +6,9 @@
  * GET  /api/letters/types           — Daftar jenis surat + status implementasi
  *
  * Authorization:
- *   LECTURER & ADMIN : generate + download
- *   STUDENT          : hanya GET /types (read info)
- *   Unauthenticated  : 401
+ *   LECTURER & ADMIN : akses penuh (types, meta, generate, download)
+ *   STUDENT          : 403 Forbidden (tidak boleh mengakses surat administrasi)
+ *   Unauthenticated  : 401 Unauthorized
  */
 
 import express from 'express';
@@ -21,6 +21,17 @@ const router = express.Router();
 
 // Semua route butuh session
 router.use(requireSession);
+
+// Mahasiswa (STUDENT) dilarang mengakses seluruh fitur surat administrasi
+router.use((req, res, next) => {
+  if (!['LECTURER', 'ADMIN'].includes(req.user?.role)) {
+    return res.status(403).json({
+      status: 'error',
+      message: 'Akses ditolak. Mahasiswa tidak diizinkan mengakses surat administrasi.',
+    });
+  }
+  next();
+});
 
 // ─── GET /api/letters/types ─────────────────────────────────────────────────
 
