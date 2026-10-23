@@ -1,9 +1,9 @@
-import type { StudentMemberOverview } from './types';
+import type { StudentMemberOverview, InternScoresResponse } from './types';
 /**
  * PORTAL KOLAB API GATEWAY
  * Version: 3.0.0 - Node.js & MySQL Implementation
  */
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL
   || (import.meta.env.DEV ? 'http://localhost:3001/api' : 'https://portal.kolab.top/api');
 
 const SESSION_KEY = 'portal-kolab.auth-token';
@@ -80,6 +80,13 @@ export const api = {
       console.error(`GET request failed for [${action}]:`, error);
       return null;
     }
+  },
+  async getScores(signal?: AbortSignal): Promise<InternScoresResponse> {
+    const response = await fetch(API_BASE_URL + '/scores', {
+      headers: { Authorization: 'Bearer ' + this.getToken() }, cache: 'no-store', signal
+    });
+    if (!response.ok) throw new Error('Nilai magang belum dapat dimuat.');
+    return response.json();
   },
   async getStudentStatus(signal?: AbortSignal): Promise<StudentMemberOverview> {
     const response = await fetch(API_BASE_URL + '/student/me/status', {

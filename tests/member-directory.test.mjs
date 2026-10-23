@@ -26,7 +26,7 @@ function directory(options = {}) {
     if (name === '../api') return { api: { postData: (...args) => { requests.push(args); return Promise.resolve({ status: 'success' }); } } };
     if (name === '../types') return { UserRole: { ADMIN: 'ADMIN', STUDENT: 'STUDENT', LECTURER: 'LECTURER' } };
     return new Proxy({}, { get: () => () => null });
-  }, console, FormData: class { constructor(values) { this.values = values; } get(key) { return this.values[key] ?? null; } } });
+  }, console, FormData: class { constructor(values) { this.values = values; } get(key) { return this.values[key] ?? null; } getAll(key) { return [].concat(this.values[key] ?? []); } } });
   function render() {
     cursor = 0;
     return module.exports.default({ userRole: 'ADMIN', startups: options.startups || [], onShowAlert() {}, showConfirm() {} });

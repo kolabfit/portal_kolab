@@ -40,3 +40,23 @@ export async function saveProfile(db, role, identity, data, administrative = fal
   }
   if (updates.length) await db.execute(`UPDATE ${table} SET ${updates.join(',')} WHERE ${key}=?`, [...values, identity]);
 }
+
+// Ganti NIM mahasiswa (admin). NIM adalah ID login dan dirujuk tabel lain tanpa foreign key,
+// jadi semua rujukan dipindah di transaksi yang sama. system_logs sengaja tidak diubah (jejak audit).
+export async function renameStudentNim(db, oldNim, newNim) {
+  newNim = String(newNim || '').trim();
+  if (!/^[A-Za-z0-9._-]{3,20}$/.test(newNim)) throw Object.assign(new Error('NIM baru harus 3–20 karakter (huruf, angka, titik, strip, garis bawah).'), { status: 400 });
+  if (newNim === oldNim) return oldNim;
+  const [[taken]] = await db.execute('SELECT nim FROM students WHERE nim=? FOR UPDATE', [newNim]);
+  if (taken) throw Object.assign(new Error(`NIM ${newNim} sudah dipakai mahasiswa lain.`), { status: 409 });
+  const [moved] = await db.execute('UPDATE students SET nim=? WHERE nim=?', [newNim, oldNim]);
+  if (!moved.affectedRows) throw Object.assign(new Error('Member tidak ditemukan.'), { status: 404 });
+  await db.execute('UPDATE internships SET student_nim=? WHERE student_nim=?', [newNim, oldNim]);
+  await db.execute("UPDATE workload_members SET member_id=? WHERE member_id=? AND member_role='STUDENT'", [newNim, oldNim]);
+  await db.execute("UPDATE workloads SET pic_id=? WHERE pic_id=? AND pic_role='STUDENT'", [newNim, oldNim]);
+  await db.execute("UPDATE repo SET owner_id=? WHERE owner_id=? AND role='STUDENT'", [newNim, oldNim]);
+  await db.execute("UPDATE trash SET owner_id=? WHERE owner_id=? AND role='STUDENT'", [newNim, oldNim]);
+  await db.execute("UPDATE cdn_assets SET owner_id=? WHERE owner_id=? AND owner_role='STUDENT'", [newNim, oldNim]);
+  await db.execute('UPDATE cdn_assets SET created_by=? WHERE created_by=?', [newNim, oldNim]);
+  return newNim;
+}

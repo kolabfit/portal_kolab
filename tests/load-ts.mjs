@@ -12,7 +12,7 @@ export function loadTs(filename, overrides = {}, globals = {}, cache = new Map()
   const module = { exports: {} }; cache.set(filename, module);
   const code = ts.transpileModule(fs.readFileSync(filename, 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true }
-  }).outputText;
+  }).outputText.replace(/import\.meta\.env/g, '({})'); // CommonJS tidak punya import.meta (Vite env kosong di tes)
   vm.runInNewContext(code, { module, exports: module.exports, console, ...globals, require(name) {
     if (name in overrides) return overrides[name];
     if (!name.startsWith('.')) return nativeRequire(name);

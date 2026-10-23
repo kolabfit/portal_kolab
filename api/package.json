@@ -9,7 +9,7 @@
         "dev": "nodemon server.js",
         "seed:admin": "node scripts/seed-admin.js",
         "db:migrate": "node scripts/migrate.js",
-        "test": "node --test tests/persistence.test.js tests/schema-coverage.test.js",
+        "test": "node --test tests/persistence.test.js tests/schema-coverage.test.js tests/scores.test.js tests/letter-pdf.test.js",
         "migrate:cdn": "node scripts/migrate-files-to-kroombox-cdn.js"
     },
     "dependencies": {

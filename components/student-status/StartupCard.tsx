@@ -1,6 +1,7 @@
 import type { StudentMemberOverview } from '../../types';
 import { startupPositionLabel } from '../../startupPositions';
 import { ExternalLink } from 'lucide-react';
+import { API_BASE_URL } from '../../api';
 
 export function StartupCard({ startup, jobDesk }: { startup: StudentMemberOverview['startup'], jobDesk?: string | null }) {
   if (!startup) {
@@ -23,7 +24,7 @@ export function StartupCard({ startup, jobDesk }: { startup: StudentMemberOvervi
       
       <div className="flex items-start gap-4 mb-6">
         {startup.logoUrl ? (
-          <img src={startup.logoUrl.startsWith('http') ? startup.logoUrl : `http://localhost:3001${startup.logoUrl}`} alt={startup.name} className="w-12 h-12 rounded-xl object-contain bg-slate-50 p-1 border border-slate-100" />
+          <img src={startup.logoUrl.startsWith('http') ? startup.logoUrl : `${API_BASE_URL.replace(/\/api\/?$/, '')}${startup.logoUrl}`} alt={startup.name} className="w-12 h-12 rounded-xl object-contain bg-slate-50 p-1 border border-slate-100" />
         ) : (
           <div className="w-12 h-12 bg-slate-50 rounded-xl flex items-center justify-center text-slate-400 font-black text-xl border border-slate-100">
             {startup.name.charAt(0)}

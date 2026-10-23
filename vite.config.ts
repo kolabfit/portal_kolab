@@ -6,7 +6,9 @@ export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, '.', '');
     return {
       server: {
-        port: 3000,
+        // Port tetap: tanpa strictPort Vite pindah ke 3001 saat 3000 terpakai lalu bentrok dengan API portal
+        port: 3100,
+        strictPort: true,
         host: '0.0.0.0',
       },
       plugins: [react()],

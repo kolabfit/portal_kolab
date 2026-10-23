@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { 
   LayoutDashboard, UserCircle, Calendar, Flag, Info, Megaphone,
-  Settings, LogOut, Menu, Bell, Users, FolderOpen, Database, X, Clock, FileText, Radio, Tags, Building2, FileStack
+  Settings, LogOut, Menu, Bell, Users, FolderOpen, Database, X, Clock, FileText, Radio, Tags, Building2, FileStack, Award
 } from 'lucide-react';
 import { AppNotification, UserRole } from '../types';
 import { api } from '../api';
@@ -16,13 +16,17 @@ interface LayoutProps {
   logo?: string;
   onLogout: () => void;
   isAdmin?: boolean;
+  /** Mode fokus (mis. editor surat): sidebar & header disembunyikan, konten selebar layar. */
+  focusMode?: boolean;
+  /** Konten memakai seluruh lebar layar, tanpa batas max-w-7xl. */
+  fullWidth?: boolean;
 }
 
 /**
  * Komponen Layout Utama Aplikasi Portal Kolab.
  * UPDATED: Added scrollbar-hide to sidebar menu navigation.
  */
-const Layout: React.FC<LayoutProps> = ({ children, activeTab, setActiveTab, userName, userRole, logo, onLogout, isAdmin }) => {
+const Layout: React.FC<LayoutProps> = ({ children, activeTab, setActiveTab, userName, userRole, logo, onLogout, isAdmin, focusMode, fullWidth }) => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
@@ -35,6 +39,7 @@ const Layout: React.FC<LayoutProps> = ({ children, activeTab, setActiveTab, user
     ...(userRole === UserRole.STUDENT ? [{ id: 'student-status', label: 'Status Saya', icon: UserCircle }] : []),
     { id: 'mitra', label: 'Mitra Ko+Lab', icon: Building2 },
     ...(userRole !== UserRole.STUDENT ? [{ id: 'surat-administrasi', label: 'Surat Administrasi', icon: FileStack }] : []),
+    { id: 'scores', label: 'Nilai Magang', icon: Award },
     { id: 'repo', label: 'Mainframe Repo', icon: FolderOpen },
     { id: 'streaming', label: 'Streaming Hub', icon: Radio },
     { id: 'informasi', label: 'Informasi', icon: Info },
@@ -89,7 +94,7 @@ const Layout: React.FC<LayoutProps> = ({ children, activeTab, setActiveTab, user
         />
       )}
 
-      <aside 
+      {!focusMode && <aside 
         onMouseEnter={() => setIsHovered(true)}
         onMouseLeave={() => setIsHovered(false)}
         className={`fixed inset-y-0 left-0 z-50 ${isSidebarOpen ? 'w-72 translate-x-0' : '-translate-x-full lg:translate-x-0'} ${sidebarWidth} bg-white border-r border-slate-200/60 transition-all duration-300 lg:sticky lg:top-0 lg:h-screen`}
@@ -124,10 +129,10 @@ const Layout: React.FC<LayoutProps> = ({ children, activeTab, setActiveTab, user
             </button>
           </div>
         </div>
-      </aside>
+      </aside>}
 
       <div className="flex-1 flex flex-col min-h-screen relative min-w-0">
-        <header className="h-16 sm:h-20 bg-white/70 backdrop-blur-xl border-b border-slate-100 flex items-center justify-between px-3.5 sm:px-6 lg:px-10 sticky top-0 z-[40]">
+        {!focusMode && <header className="h-16 sm:h-20 bg-white/70 backdrop-blur-xl border-b border-slate-100 flex items-center justify-between px-3.5 sm:px-6 lg:px-10 sticky top-0 z-[40]">
           <div className="flex items-center gap-3">
             <button onClick={() => setIsSidebarOpen(true)} className="p-2.5 text-slate-600 lg:hidden rounded-xl bg-white border border-slate-100 shadow-sm"><Menu size={22} /></button>
             <div className="lg:hidden w-10 h-10 flex items-center justify-center rounded-lg overflow-hidden shadow-md bg-slate-900"><img src={logo || "https://i.imgur.com/EGH7u4a.png"} className="w-full h-full object-contain p-0.5 drop-shadow-md" alt="Portal Ko+Lab" /></div>
@@ -176,9 +181,9 @@ const Layout: React.FC<LayoutProps> = ({ children, activeTab, setActiveTab, user
                <span className="text-[8px] lg:text-[9px] font-bold text-slate-400 uppercase tracking-widest mt-1">{userRole}</span>
             </div>
           </div>
-        </header>
+        </header>}
         <main className="flex-1 overflow-x-hidden">
-          <div className="max-w-7xl mx-auto p-3.5 sm:p-6 lg:p-8 xl:p-10">{children}</div>
+          <div className={focusMode ? "p-3 sm:p-4 lg:p-5" : `${fullWidth ? "max-w-none" : "max-w-7xl"} mx-auto p-3.5 sm:p-6 lg:p-8 xl:p-10`}>{children}</div>
         </main>
       </div>
     </div>

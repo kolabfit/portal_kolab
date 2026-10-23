@@ -306,3 +306,20 @@ export interface Mitra {
   createdAt?: string;
   updatedAt?: string;
 }
+
+// Nilai magang dari Social Credit & Presensi (lihat api/routes/scores.js)
+export interface InternScore {
+  nim: string;
+  name: string;
+  startupName: string | null;
+  fieldSupervisor: string | null;
+  internship: { status: string; startDate: string; endDate: string };
+  socialCredit: { score: number; grade: string; aspects: { name: string; weight: number; value: number }[] } | null;
+  presence: {
+    kpiScore: number; kpiStatus: string; periodStart: string; periodEnd: string;
+    ontime: number; late: number; totalLateMinutes: number; alpha: number; izinSakit: number;
+    missingDailyReports: number; reports: { approved: number; disapproved: number; pending: number };
+  } | null;
+}
+export type ScoreSourceStatus = 'ok' | 'error' | 'not_configured';
+export interface InternScoresResponse { data: InternScore[]; sources: { socialCredit: ScoreSourceStatus; presence: ScoreSourceStatus } }

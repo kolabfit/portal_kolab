@@ -11,7 +11,7 @@ import {
   Maximize2, Minimize2, Check, Grid, Settings2
 } from 'lucide-react';
 import { UserRole, StartupTeam } from '../types';
-import { api } from '../api';
+import { api, API_BASE_URL } from '../api';
 import DropZone from '../components/DropZone';
 import {
   DocumentBlock,
@@ -19,13 +19,14 @@ import {
   getDefaultBlocksForType
 } from './suratTemplateDefaults';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001/api';
 
 interface SuratAdministrasiViewProps {
   userRole: UserRole;
   startups: StartupTeam[];
   onShowAlert: (title: string, msg: string, type: 'success' | 'error') => void;
   showConfirm?: (title: string, message: string, onConfirm: () => void) => void;
+  /** Dipanggil true saat editor dibuka (mode fokus tanpa sidebar & header), false saat kembali ke galeri. */
+  onFocusModeChange?: (focus: boolean) => void;
 }
 
 interface LetterTypeInfo {
@@ -195,6 +196,14 @@ const AVAILABLE_PALETTE_ELEMENTS: Array<{
     iconBg: 'bg-rose-50 border-rose-200'
   },
   {
+    type: 'gambar',
+    label: 'LOGO / GAMBAR',
+    desc: 'Posisi bebas',
+    icon: ImageIcon,
+    iconColor: 'text-orange-600',
+    iconBg: 'bg-orange-50 border-orange-200'
+  },
+  {
     type: 'spasi_kosong',
     label: 'SPASI KOSONG',
     desc: 'Tambah komponen',
@@ -204,12 +213,71 @@ const AVAILABLE_PALETTE_ELEMENTS: Array<{
   }
 ];
 
-const SuratAdministrasiView: React.FC<SuratAdministrasiViewProps> = ({ userRole, startups, onShowAlert, showConfirm }) => {
+// Blok tanda tangan: lebar & tinggi slot sama dengan api/lib/renderers/dynamicBlockRenderer.js
+// (SIGNATURE_BLOCK_WIDTH 240pt, tinggi gambar style.signatureHeight). Blok menempel kiri/tengah/kanan,
+// teks di dalamnya rata kiri (rata tengah bila blok di tengah).
+const SIGNATURE_BLOCK_WIDTH = 240;
+// Tinggi gambar tanda tangan (style.signatureHeight, default 56); slot = gambar + jarak 4 atas-bawah
+// Warna garis tabel (style.borderColor), default hitam — sama dengan dynamicBlockRenderer.js
+const tableBorderColor = (style: DocumentBlock["style"]) => style.borderColor || "#000000";
+const signatureImgHeight = (style: DocumentBlock["style"]) => style.signatureHeight || 56;
+const signatureBoxStyle = (align?: string, width?: number): React.CSSProperties => ({
+  width: width || SIGNATURE_BLOCK_WIDTH,
+  maxWidth: '100%',
+  marginLeft: align === 'left' ? 0 : 'auto',
+  marginRight: align === 'center' ? 'auto' : 0,
+  textAlign: align === 'center' ? 'center' : 'left',
+});
+// "**teks**" di paragraf = tebal (sama dengan renderTabbedText di PDF)
+const richText = (text: string) => text.split(/\*\*([\s\S]+?)\*\*/).map((s, i) => (i % 2 ? <strong key={i}>{s}</strong> : s));
+// Template sertifikat: latar, margin & font sama dengan CERTIFICATE_TYPE/CERT_MARGINS di dynamicBlockRenderer.js
+const CERTIFICATE_TYPE = 'surat-sertifikat';
+const CERT_PAPER: React.CSSProperties = {
+  padding: '40px 60px 30px 177px',
+  fontFamily: "'Poppins', sans-serif",
+  backgroundImage: 'url(/sertifikat-bg.png)',
+  backgroundSize: '100% 100%',
+};
+// Geometri blok = dynamicBlockRenderer.js. Tinggi baris alami font PDF (PDFKit currentLineHeight(true) / ukuran):
+// Helvetica 1.156, Poppins (sertifikat) 1.5
+const naturalLineHeight = (cert: boolean) => (cert ? 1.5 : 1.156);
+// Jarak bawah bila style.marginBottom kosong = spaceAfter(n) di PDF: n × tinggi baris font terakhir di blok
+const defaultSpaceAfter = (b: DocumentBlock, lh: number) => {
+  const s = b.style, d = b.data;
+  switch (b.type) {
+    case 'kop_surat': return 0.8 * 8 * lh;
+    case 'judul_surat': return 0.8 * (d.hal || d.lampiran ? 9.5 : d.nomor ? 10 : s.fontSize || 13) * lh;
+    case 'paragraf_teks': return 0.6 * (s.fontSize || 11) * lh;
+    case 'tabel_data': return d.headers?.length ? 0.8 * ((s.fontSize || 9.5) - (d.rows?.length ? 0.5 : 0)) * lh : 0;
+    case 'tanda_tangan': return 0.8 * (s.fontSize || 11) * lh;
+    default: return 0;
+  }
+};
+const blockMarginBottom = (b: DocumentBlock, lh: number) =>
+  typeof b.style.marginBottom === 'number' && b.style.marginBottom >= 0 ? b.style.marginBottom : defaultSpaceAfter(b, lh);
+// Tinggi minimum baris tabel (pt), sama dengan PDF
+const tableRowHeight = (s: DocumentBlock['style']) => Math.max(s.rowHeight || 28, 20);
+// Textarea setinggi isinya (teks membungkus seperti di PDF). Native field-sizing bila didukung:
+// scrollHeight ikut menghitung glyph yang melewati line-height kecil (judul besar) sehingga terlalu tinggi.
+const FIELD_SIZING = typeof CSS !== 'undefined' && CSS.supports('field-sizing', 'content');
+const fitTextarea = (el: HTMLTextAreaElement | null) => {
+  if (!el || FIELD_SIZING) return;
+  el.style.height = 'auto';
+  el.style.height = `${el.scrollHeight}px`;
+};
+
+const SuratAdministrasiView: React.FC<SuratAdministrasiViewProps> = ({ userRole, startups, onShowAlert, showConfirm, onFocusModeChange }) => {
   const isLecturerOrAdmin = userRole === UserRole.LECTURER || userRole === UserRole.ADMIN;
 
   // View state: 'gallery' (landing card list) vs 'editor' (drag & drop visual document builder)
   const [currentView, setCurrentView] = useState<'gallery' | 'editor'>('gallery');
   const [gallerySearch, setGallerySearch] = useState('');
+
+  // Editor = mode fokus (sidebar & header portal disembunyikan); keluar lewat tombol back ke galeri
+  useEffect(() => {
+    onFocusModeChange?.(currentView === 'editor');
+    return () => onFocusModeChange?.(false);
+  }, [currentView, onFocusModeChange]);
 
   // Custom templates created by user
   const [customTemplates, setCustomTemplates] = useState<Array<{
@@ -310,9 +378,45 @@ const SuratAdministrasiView: React.FC<SuratAdministrasiViewProps> = ({ userRole,
   const [activePageNumber, setActivePageNumber] = useState<number>(1);
 
   // Canvas visual settings
-  const [zoom, setZoom] = useState<number>(75);
+  const [zoom, setZoom] = useState<number>(100);
   const [showGrid, setShowGrid] = useState<boolean>(true);
   const [paperOrientation, setPaperOrientation] = useState<'portrait' | 'landscape'>('portrait');
+  const [showSidePanels, setShowSidePanels] = useState<boolean>(true);
+  const canvasRef = useRef<HTMLDivElement>(null);
+  const clampZoom = (z: number) => Math.max(40, Math.min(200, Math.round(z)));
+  const isCert = activeTypeId === CERTIFICATE_TYPE;
+  // Paragraf yang sedang diketik (paragraf lain berisi **tebal** tampil sebagai teks berformat)
+  const [editingParaId, setEditingParaId] = useState<string | null>(null);
+  // Kertas kanvas = ruang PDF (1px = 1pt): ukuran, margin & font sama dengan api/lib/renderers/dynamicBlockRenderer.js.
+  // CSS zoom (bukan transform) agar tinggi/lebar layout ikut mengecil dan scroll tetap pas.
+  const paperStyle = (z: number): React.CSSProperties => ({
+    zoom: z / 100,
+    width: paperOrientation === 'landscape' ? 842 : 595,
+    minHeight: paperOrientation === 'landscape' ? 595 : 842,
+    padding: paperOrientation === 'landscape' ? '40px 50px' : '50px 50px 50px 60px',
+    fontFamily: 'Helvetica, Arial, sans-serif',
+    ...(isCert ? CERT_PAPER : {}),
+  });
+  // Pas lebar: kertas memenuhi lebar area kanvas
+  const fitZoom = () => {
+    const w = canvasRef.current?.clientWidth;
+    if (w) setZoom(clampZoom(((w - 64) / (paperOrientation === 'landscape' ? 842 : 595)) * 100));
+  };
+  useEffect(() => {
+    if (currentView === 'editor' && editorMode === 'visual') fitZoom();
+  }, [currentView, editorMode, paperOrientation, showSidePanels]);
+  // Ctrl/⌘ + scroll di kanvas = zoom (listener native agar preventDefault berlaku)
+  useEffect(() => {
+    const el = canvasRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey && !e.metaKey) return;
+      e.preventDefault();
+      setZoom(z => clampZoom(z - Math.sign(e.deltaY) * 10));
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, [currentView, editorMode]);
 
   // Preview & Download states
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -568,6 +672,27 @@ const SuratAdministrasiView: React.FC<SuratAdministrasiViewProps> = ({ userRole,
     }
   };
 
+  // Pintasan editor: Ctrl+Z / Ctrl+Y (Ctrl+Shift+Z) undo-redo, Delete hapus blok terpilih, Esc batal pilih.
+  // Diabaikan saat mengetik di input agar undo bawaan teks tetap jalan.
+  useEffect(() => {
+    if (currentView !== 'editor') return;
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement;
+      if (el.closest('input, textarea, select, [contenteditable="true"]')) return;
+      const mod = e.ctrlKey || e.metaKey;
+      const key = e.key.toLowerCase();
+      if (mod && key === 'z' && !e.shiftKey) { e.preventDefault(); handleUndo(); }
+      else if (mod && (key === 'y' || (key === 'z' && e.shiftKey))) { e.preventDefault(); handleRedo(); }
+      else if ((e.key === 'Delete' || e.key === 'Backspace') && selectedBlockId) {
+        const b = currentBlocks.find(x => x.id === selectedBlockId);
+        if (b) { e.preventDefault(); handleDeleteBlock(b.id, b.title); }
+      }
+      else if (e.key === 'Escape' && !isFullscreen) setSelectedBlockId(null);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  });
+
   // Add block from palette
   const handleAddBlock = (type: ElementType) => {
     const newId = `${type}-${Date.now()}`;
@@ -680,6 +805,10 @@ const SuratAdministrasiView: React.FC<SuratAdministrasiViewProps> = ({ userRole,
           }
         };
         break;
+      case 'gambar':
+        // Muncul di pojok kiri atas area isi; geser ke posisi yang diinginkan
+        newBlock = { id: newId, type: 'gambar', title: 'Logo / Gambar', data: { imageUrl: '' }, style: { x: 60, y: 40, width: 100 } };
+        break;
       case 'spasi_kosong':
       default:
         newBlock = {
@@ -698,7 +827,6 @@ const SuratAdministrasiView: React.FC<SuratAdministrasiViewProps> = ({ userRole,
     const nextBlocks = [...currentBlocks, newBlock];
     updateBlocks(nextBlocks);
     setSelectedBlockId(newId);
-    onShowAlert('Komponen Ditambahkan', `Komponen "${newBlock.title}" berhasil ditambahkan ke Halaman ${activePageNumber}.`, 'success');
   };
 
   // ─── Multi-page handlers ───────────────────────────────────────────────────
@@ -712,7 +840,6 @@ const SuratAdministrasiView: React.FC<SuratAdministrasiViewProps> = ({ userRole,
       localStorage.setItem(`kolab_pages_${activeTypeId}`, String(newCount));
     } catch {}
     setActivePageNumber(newCount);
-    onShowAlert('Halaman Ditambahkan', `Halaman ${newCount} berhasil ditambahkan ke ${activeDef.title}.`, 'success');
   };
 
   const handleDeletePage = (pageToDelete: number) => {
@@ -726,7 +853,8 @@ const SuratAdministrasiView: React.FC<SuratAdministrasiViewProps> = ({ userRole,
       ? `Halaman ${pageToDelete} berisi ${blocksOnPage.length} komponen. Yakin ingin menghapus halaman ini? Komponen akan dipindahkan ke Halaman ${Math.max(1, pageToDelete - 1)}.`
       : `Hapus Halaman ${pageToDelete}?`;
 
-    if (window.confirm(confirmMsg)) {
+    // Konfirmasi hanya bila halaman berisi komponen; halaman kosong langsung dihapus
+    if (blocksOnPage.length === 0 || window.confirm(confirmMsg)) {
       const nextBlocks = currentBlocks.map(b => {
         const p = b.pageNumber || 1;
         if (p === pageToDelete) {
@@ -744,7 +872,6 @@ const SuratAdministrasiView: React.FC<SuratAdministrasiViewProps> = ({ userRole,
       } catch {}
       updateBlocks(nextBlocks);
       setActivePageNumber(prev => Math.min(prev, newCount));
-      onShowAlert('Halaman Dihapus', `Halaman ${pageToDelete} berhasil dihapus.`, 'success');
     }
   };
 
@@ -757,7 +884,6 @@ const SuratAdministrasiView: React.FC<SuratAdministrasiViewProps> = ({ userRole,
     });
     updateBlocks(nextBlocks);
     setActivePageNumber(targetPage);
-    onShowAlert('Pindah Halaman', `Komponen dipindahkan ke Halaman ${targetPage}.`, 'success');
   };
 
   // Drag and drop reordering inside canvas
@@ -789,7 +915,6 @@ const SuratAdministrasiView: React.FC<SuratAdministrasiViewProps> = ({ userRole,
     updateBlocks(next);
     setDraggedBlockIndex(null);
     setDragOverBlockIndex(null);
-    onShowAlert('Urutan Diperbarui', `Komponen "${moved.title}" berhasil dipindahkan.`, 'success');
   };
 
   const handleDropOnPage = (e: React.DragEvent, targetPageNum: number) => {
@@ -801,7 +926,6 @@ const SuratAdministrasiView: React.FC<SuratAdministrasiViewProps> = ({ userRole,
       moved.pageNumber = targetPageNum;
       updateBlocks(next);
       setActivePageNumber(targetPageNum);
-      onShowAlert('Pindah Halaman', `Komponen "${moved.title}" dipindahkan ke Halaman ${targetPageNum}.`, 'success');
     }
     setDraggedBlockIndex(null);
     setDragOverBlockIndex(null);
@@ -824,7 +948,6 @@ const SuratAdministrasiView: React.FC<SuratAdministrasiViewProps> = ({ userRole,
     const next = currentBlocks.filter(b => b.id !== id);
     updateBlocks(next);
     if (selectedBlockId === id) setSelectedBlockId(null);
-    onShowAlert('Komponen Dihapus', `Komponen "${title}" dihapus dari dokumen.`, 'success');
   };
 
   // Duplicate Block
@@ -840,7 +963,6 @@ const SuratAdministrasiView: React.FC<SuratAdministrasiViewProps> = ({ userRole,
     const next = [...currentBlocks, clone];
     updateBlocks(next);
     setSelectedBlockId(clone.id);
-    onShowAlert('Komponen Diduplikasi', `Salinan komponen berhasil dibuat di Halaman ${clone.pageNumber}.`, 'success');
   };
 
   // Update selected block style
@@ -923,13 +1045,12 @@ const SuratAdministrasiView: React.FC<SuratAdministrasiViewProps> = ({ userRole,
       if (targetId) {
         updateBlockDataById(targetId, { signatureUrl: dataUrl }, true);
       }
-      onShowAlert('Tanda Tangan Berhasil Dimuat', 'Gambar tanda tangan digital berhasil ditampilkan di dokumen.', 'success');
     };
     reader.readAsDataURL(file);
   };
 
   // Kop Surat Logo processor
-  const handleProcessLogoFile = (file: File, blockId: string) => {
+  const handleProcessLogoFile = (file: File, blockId: string, key = 'logoUrl') => {
     if (!file) return;
     if (!file.type.startsWith('image/')) {
       onShowAlert('Format Tidak Didukung', 'Silakan pilih file gambar logo (PNG atau JPG).', 'error');
@@ -943,8 +1064,7 @@ const SuratAdministrasiView: React.FC<SuratAdministrasiViewProps> = ({ userRole,
     const reader = new FileReader();
     reader.onload = (ev) => {
       const dataUrl = ev.target?.result as string;
-      updateBlockDataById(blockId, { logoUrl: dataUrl }, true);
-      onShowAlert('Logo Berhasil Dimuat', 'Logo resmi berhasil diperbarui pada Kop Surat.', 'success');
+      updateBlockDataById(blockId, { [key]: dataUrl }, true);
     };
     reader.readAsDataURL(file);
   };
@@ -970,7 +1090,6 @@ const SuratAdministrasiView: React.FC<SuratAdministrasiViewProps> = ({ userRole,
     const newRow = Array(colCount).fill('');
     const nextRows = [...(block.data.rows || []), newRow];
     updateBlockDataById(blockId, { rows: nextRows }, true);
-    onShowAlert('Baris Ditambahkan', 'Baris baru berhasil ditambahkan pada tabel.', 'success');
   };
 
   const handleDeleteTableRow = (blockId: string, rowIndex: number) => {
@@ -983,7 +1102,6 @@ const SuratAdministrasiView: React.FC<SuratAdministrasiViewProps> = ({ userRole,
     }
     const nextRows = rows.filter((_: any, idx: number) => idx !== rowIndex);
     updateBlockDataById(blockId, { rows: nextRows }, true);
-    onShowAlert('Baris Dihapus', `Baris #${rowIndex + 1} berhasil dihapus dari tabel.`, 'success');
   };
 
   const handleAddTableColumn = (blockId: string) => {
@@ -1001,7 +1119,6 @@ const SuratAdministrasiView: React.FC<SuratAdministrasiViewProps> = ({ userRole,
     if (nextWidths.length > 0) nextWidths[0] += remainder;
 
     updateBlockDataById(blockId, { headers: nextHeaders, rows: nextRows, colWidths: nextWidths }, true);
-    onShowAlert('Kolom Ditambahkan', 'Kolom baru berhasil ditambahkan pada tabel.', 'success');
   };
 
   const handleDeleteTableColumn = (blockId: string, colIndex: number) => {
@@ -1023,7 +1140,6 @@ const SuratAdministrasiView: React.FC<SuratAdministrasiViewProps> = ({ userRole,
     if (nextWidths.length > 0) nextWidths[0] += remainder;
 
     updateBlockDataById(blockId, { headers: nextHeaders, rows: nextRows, colWidths: nextWidths }, true);
-    onShowAlert('Kolom Dihapus', 'Kolom berhasil dihapus dari tabel.', 'success');
   };
 
   const handleSetColumnWidth = (blockId: string, colIndex: number, newWidthPercent: number) => {
@@ -1064,7 +1180,6 @@ const SuratAdministrasiView: React.FC<SuratAdministrasiViewProps> = ({ userRole,
     if (nextWidths.length > 0) nextWidths[0] += remainder;
 
     updateBlockDataById(blockId, { colWidths: nextWidths }, true);
-    onShowAlert('Lebar Kolom Diratakan', 'Semua kolom tabel diatur dengan proporsi lebar yang sama rata.', 'success');
   };
 
   // Update block style by ID (with optional history recording)
@@ -1092,6 +1207,60 @@ const SuratAdministrasiView: React.FC<SuratAdministrasiViewProps> = ({ userRole,
     }
   };
 
+  // Tarik sudut gambar tanda tangan untuk mengubah tingginya (24–160pt)
+  const handleStartSignatureResize = (e: React.MouseEvent, block: DocumentBlock) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const startY = e.clientY;
+    const startH = signatureImgHeight(block.style);
+    const zoomFactor = Math.max(0.2, zoom / 100);
+    let h = startH;
+    const onMove = (m: MouseEvent) => {
+      h = Math.max(24, Math.min(160, Math.round(startH + (m.clientY - startY) / zoomFactor)));
+      updateBlockStyleById(block.id, { signatureHeight: h });
+    };
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      document.body.style.cursor = '';
+      updateBlockStyleById(block.id, { signatureHeight: h }, true);
+    };
+    document.body.style.cursor = 'nwse-resize';
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  };
+
+  // Geser (move) atau tarik sudut (resize) logo/gambar posisi bebas; satu langkah undo per tarikan
+  const handleStartImageDrag = (e: React.MouseEvent, block: DocumentBlock, mode: 'move' | 'resize') => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    setSelectedBlockId(block.id);
+    const z = Math.max(0.2, zoom / 100);
+    const sx = e.clientX, sy = e.clientY;
+    const { x = 0, y = 0, width = 100 } = block.style;
+    const pageW = isCert || paperOrientation === 'landscape' ? 842 : 595;
+    const pageH = pageW === 842 ? 595 : 842;
+    const clamp = (v: number, lo: number, hi: number) => Math.round(Math.max(lo, Math.min(hi, v)) * 10) / 10;
+    let patch: Partial<DocumentBlock['style']> | null = null;
+    const onMove = (m: MouseEvent) => {
+      const dx = (m.clientX - sx) / z, dy = (m.clientY - sy) / z;
+      patch = mode === 'move'
+        ? { x: clamp(x + dx, 0, pageW - width), y: clamp(y + dy, 0, pageH - 10) }
+        : { width: clamp(width + dx, 16, pageW - x) };
+      updateBlockStyleById(block.id, patch);
+    };
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      document.body.style.cursor = '';
+      if (patch) updateBlockStyleById(block.id, patch, true);
+    };
+    document.body.style.cursor = mode === 'move' ? 'move' : 'nwse-resize';
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  };
+
   const handleStartColResize = (e: React.MouseEvent, blockId: string, colIndex: number) => {
     e.preventDefault();
     e.stopPropagation();
@@ -1108,9 +1277,7 @@ const SuratAdministrasiView: React.FC<SuratAdministrasiViewProps> = ({ userRole,
     if (!tableEl) return;
 
     const tableRect = tableEl.getBoundingClientRect();
-    const zoomFactor = Math.max(0.2, zoom / 100);
-    const actionColWidthPx = 44 * zoomFactor;
-    const dataTableWidthPx = Math.max(80, tableRect.width - actionColWidthPx);
+    const dataTableWidthPx = Math.max(80, tableRect.width);
     const startX = e.clientX;
     let latestWidths = [...initialWidths];
 
@@ -1220,7 +1387,6 @@ const SuratAdministrasiView: React.FC<SuratAdministrasiViewProps> = ({ userRole,
       return b;
     });
     updateBlocks(next);
-    onShowAlert('Kerapatan Baris Diubah', `Tinggi baris tabel diatur ke mode ${density === 'compact' ? 'Rapat' : density === 'relaxed' ? 'Lega' : 'Standar'}.`, 'success');
   };
 
   // Save template configuration to localStorage
@@ -1390,85 +1556,156 @@ const SuratAdministrasiView: React.FC<SuratAdministrasiViewProps> = ({ userRole,
   };
 
   // ───────────────────────────────────────────────────────────────────────────
-  // HELPER: RENDER CLEAN DOCUMENT BLOCK FOR FULLSCREEN VIEW
+  // HELPER: ISI BLOK — dipakai kanvas editor (editable) & layar penuh (baca saja)
+  // Ukuran mengikuti api/lib/renderers/dynamicBlockRenderer.js (1px = 1pt), jadi editor = PDF.
   // ───────────────────────────────────────────────────────────────────────────
-  const renderFullscreenBlock = (block: DocumentBlock) => {
+  const lh = naturalLineHeight(isCert);
+  const usableWidth = isCert ? 605 : paperOrientation === 'landscape' ? 742 : 485;
+  const blockMargins = (block: DocumentBlock): React.CSSProperties => ({
+    marginTop: Math.max(0, block.style.marginTop || 0),
+    marginBottom: blockMarginBottom(block, lh),
+  });
+
+  // Logo/gambar posisi bebas: absolut terhadap kertas (= x/y/lebar pt di PDF), di atas latar, tidak ikut alur blok
+  const renderFloatingImage = (block: DocumentBlock, editable: boolean, pageNum: number) => {
+    const s = block.style, url = block.data.imageUrl;
+    const sel = editable && selectedBlockId === block.id;
+    const upload = (
+      <input type="file" accept="image/*" className="hidden" onChange={(e) => e.target.files?.[0] && handleProcessLogoFile(e.target.files[0], block.id, 'imageUrl')} />
+    );
+    return (
+      <div
+        key={block.id}
+        className={`absolute z-20 group/img ${editable ? 'cursor-move' : ''} ${sel ? 'ring-2 ring-orange-500' : editable ? 'hover:ring-1 hover:ring-orange-300' : ''}`}
+        style={{ left: s.x || 0, top: s.y || 0, width: s.width || 100 }}
+        onMouseDown={editable ? (e) => handleStartImageDrag(e, block, 'move') : undefined}
+        onClick={editable ? (e) => { e.stopPropagation(); setSelectedBlockId(block.id); setActivePageNumber(pageNum); } : undefined}
+        title={editable ? `${block.title} — geser untuk memindah, tarik sudut untuk ubah ukuran` : undefined}
+      >
+        {url ? (
+          <img src={url} alt={block.title} draggable={false} className="block w-full h-auto select-none pointer-events-none" />
+        ) : editable && (
+          <label onMouseDown={(e) => e.stopPropagation()} className="h-12 border-2 border-dashed border-orange-300 hover:border-orange-500 bg-orange-50/80 rounded flex flex-col items-center justify-center cursor-pointer text-orange-600 text-[8px] font-bold">
+            <Upload size={12} /> Unggah logo
+            {upload}
+          </label>
+        )}
+        {sel && (
+          <>
+            <div onMouseDown={(e) => e.stopPropagation()} className="absolute bottom-full left-0 mb-1.5 flex gap-1 whitespace-nowrap" style={{ fontFamily: 'Plus Jakarta Sans, sans-serif' }}>
+              <label className="px-2 py-0.5 bg-white hover:bg-orange-50 text-slate-800 border border-slate-200 rounded-md text-[9px] font-bold flex items-center gap-1 cursor-pointer shadow-sm">
+                <Upload size={10} className="text-orange-600" /> Ganti
+                {upload}
+              </label>
+              <button type="button" onClick={(e) => { e.stopPropagation(); handleDeleteBlock(block.id, block.title); }} className="px-2 py-0.5 bg-red-600 hover:bg-red-700 text-white rounded-md text-[9px] font-bold flex items-center gap-1 shadow-sm">
+                <Trash2 size={10} /> Hapus
+              </button>
+            </div>
+            <div
+              onMouseDown={(e) => handleStartImageDrag(e, block, 'resize')}
+              className="absolute -right-1.5 -bottom-1.5 w-3.5 h-3.5 bg-orange-600 border-2 border-white rounded-sm cursor-nwse-resize shadow"
+              title={`Tarik untuk ubah ukuran (lebar ${s.width || 100}pt)`}
+            />
+          </>
+        )}
+      </div>
+    );
+  };
+
+  const renderBlockContent = (block: DocumentBlock, isSelected: boolean, editable: boolean) => {
+    const s = block.style, d = block.data;
+    const stop = { draggable: false, onMouseDown: (e: React.MouseEvent) => e.stopPropagation() };
+    const save = () => updateBlocks(currentBlocks);
+    const fieldCls = 'bg-transparent outline-none border-0 p-0 m-0 rounded-sm hover:ring-1 hover:ring-slate-300 focus:ring-2 focus:ring-orange-400 focus:bg-white/90 placeholder:text-slate-300 transition-shadow';
+    // Teks yang membungkus seperti di PDF: textarea setinggi isinya, tanpa border/padding
+    const text = (value: string, onChange: (v: string) => void, style: React.CSSProperties, placeholder = '', onBlur = save) => !editable ? (
+      <div className="whitespace-pre-wrap" style={{ lineHeight: lh, textAlign: 'inherit', ...style }}>{value}</div>
+    ) : (
+      <textarea
+        {...stop}
+        rows={1}
+        ref={fitTextarea}
+        value={value}
+        placeholder={placeholder}
+        onChange={(e) => { onChange(e.target.value); fitTextarea(e.target); }}
+        onBlur={onBlur}
+        className={`${fieldCls} w-full block resize-none overflow-hidden`}
+        style={{ fontFamily: 'inherit', lineHeight: lh, textAlign: 'inherit', fieldSizing: 'content', ...style } as React.CSSProperties}
+      />
+    );
+    const field = (key: string, style: React.CSSProperties, placeholder: string) =>
+      text(d[key] || '', (v) => updateBlockDataById(block.id, { [key]: v }), style, placeholder);
+    // Isian pendek di tengah kalimat ("Nomor: ___"), lebar mengikuti isi
+    const inline = (key: string, placeholder: string) => !editable ? <span>{d[key]}</span> : (
+      <input
+        {...stop}
+        type="text"
+        value={d[key] || ''}
+        placeholder={placeholder}
+        size={Math.max(4, (d[key] || placeholder).length)}
+        onChange={(e) => updateBlockDataById(block.id, { [key]: e.target.value })}
+        onBlur={save}
+        className={`${fieldCls} inline-block align-top`}
+        style={{ font: 'inherit', color: 'inherit', height: `${lh}em`, fieldSizing: 'content' } as React.CSSProperties}
+      />
+    );
+    // Isian kosong opsional tidak dicetak PDF, jadi hanya muncul saat blok dipilih
+    const shown = (key: string) => !!d[key] || (editable && isSelected);
+
     switch (block.type) {
       case 'kop_surat': {
-        const logoUrl = block.data.logoUrl;
+        // PDF: logo 44pt di x+10; teks mulai y+2 (geser 59pt bila ada logo); garis ganda 0.4 baris di bawah teks
+        const logo = d.logoUrl;
         return (
-          <div
-            key={block.id}
-            className="text-center relative pb-2 select-text"
-            style={{
-              textAlign: block.style.textAlign || 'center',
-              marginTop: `${block.style.marginTop || 0}px`,
-              marginBottom: `${block.style.marginBottom || 0}px`,
-              paddingLeft: `${block.style.paddingX || 8}px`,
-              paddingRight: `${block.style.paddingX || 8}px`
-            }}
-          >
-            <div className="flex items-center justify-center gap-3 mb-1">
-              {logoUrl ? (
-                <img src={logoUrl} alt="Logo" className="w-12 h-12 object-contain shrink-0" />
-              ) : (
-                <div className="w-10 h-10 rounded-xl bg-orange-50 border border-orange-200 flex items-center justify-center text-orange-600 font-black text-xs shrink-0">
-                  Ko+Lab
-                </div>
-              )}
-              <div className="flex-1 max-w-lg">
-                <div
-                  className="font-bold tracking-tight text-slate-900 uppercase"
-                  style={{ fontSize: `${block.style.fontSize || 12}pt` }}
-                >
-                  {block.data.institution || 'RESEARCH ALLIANCE Ko+Lab'}
-                </div>
-                <div className="text-[10px] font-semibold text-slate-700 tracking-wide">
-                  {block.data.faculty || ''}
-                </div>
-              </div>
-            </div>
-            {block.data.address && (
-              <div className="text-[9px] text-slate-500 leading-tight">
-                {block.data.address}
+          <div className="relative" style={{ textAlign: s.textAlign || 'center' }}>
+            {(logo || editable) && (
+              <div className={`absolute top-0 group/logo z-10 ${logo ? '' : 'opacity-0 group-hover:opacity-100'}`} style={{ left: 10, width: 44, height: 44 }}>
+                {logo ? (
+                  <img src={logo} alt="Logo" className="w-full h-full object-contain object-left-top" />
+                ) : (
+                  <div className="w-full h-full rounded border border-dashed border-orange-300 bg-orange-50/80 flex items-center justify-center text-orange-600 text-[8px] font-bold">Logo</div>
+                )}
+                {editable && (
+                  <label {...stop} className="absolute inset-0 bg-slate-900/60 rounded opacity-0 group-hover/logo:opacity-100 transition-opacity flex items-center justify-center cursor-pointer text-white" title="Klik untuk Ganti Logo Kop Surat">
+                    <Upload size={12} />
+                    <input type="file" accept="image/*" className="hidden" onChange={(e) => e.target.files?.[0] && handleProcessLogoFile(e.target.files[0], block.id)} />
+                  </label>
+                )}
               </div>
             )}
-            <div className="mt-2 border-b-2 border-slate-900 border-double pt-1" />
+            <div style={{ paddingTop: 2, marginLeft: logo ? 59 : 0, marginRight: logo ? 10 : 0, minHeight: logo ? 48 : undefined }}>
+              {field('institution', { fontSize: s.fontSize || 12, fontWeight: 700, color: '#0f172a' }, 'Nama Institusi / Lembaga')}
+              <div style={{ height: 1 }} />
+              {field('faculty', { fontSize: 9.5, fontWeight: 700, color: '#1e293b' }, 'Fakultas / Universitas')}
+              <div style={{ height: 2 }} />
+              {field('address', { fontSize: 8, color: '#64748b' }, 'Alamat & Kontak Lembaga')}
+            </div>
+            <div style={{ height: 0.4 * 8 * lh }} />
+            {/* Garis 1pt di y & 2pt di y+2; seperti PDF, garis tidak menambah tinggi blok */}
+            <div className="relative h-0">
+              <div className="absolute inset-x-0 bg-[#0f172a]" style={{ top: -0.5, height: 1 }} />
+              <div className="absolute inset-x-0 bg-[#0f172a]" style={{ top: 1, height: 2 }} />
+            </div>
           </div>
         );
       }
 
       case 'judul_surat': {
+        const meta = (['hal', 'lampiran'] as const).filter(k => d[k] || (editable && isSelected && d[k] !== undefined));
         return (
-          <div
-            key={block.id}
-            className="text-center py-2 select-text"
-            style={{
-              textAlign: block.style.textAlign || 'center',
-              marginTop: `${block.style.marginTop || 0}px`,
-              marginBottom: `${block.style.marginBottom || 0}px`,
-              paddingLeft: `${block.style.paddingX || 8}px`,
-              paddingRight: `${block.style.paddingX || 8}px`
-            }}
-          >
-            <div
-              className="uppercase tracking-wide text-slate-900 underline font-bold"
-              style={{
-                fontSize: `${block.style.fontSize || 13}pt`,
-                fontWeight: block.style.fontWeight || 'bold'
-              }}
-            >
-              {block.data.title || 'SURAT KETERANGAN'}
-            </div>
-            {block.data.nomor && (
-              <div className="text-xs text-slate-600 font-medium mt-0.5">
-                Nomor: {block.data.nomor}
-              </div>
+          <div style={{ textAlign: s.textAlign || 'center' }}>
+            {field('title', { fontSize: s.fontSize || 13, fontWeight: s.fontWeight === 'normal' ? 400 : 700, color: s.color || '#0f172a' }, 'JUDUL SURAT RESMI')}
+            {shown('nomor') && (
+              <div style={{ marginTop: 2, fontSize: 10, lineHeight: lh, color: '#334155' }}>Nomor: {inline('nomor', '001/SKET/RA-KOLABFIT/2026')}</div>
             )}
-            {(block.data.hal || block.data.lampiran) && (
-              <div className="text-[11px] text-slate-500 flex justify-center gap-4 mt-1 font-medium">
-                {block.data.hal && <span>Hal: {block.data.hal}</span>}
-                {block.data.lampiran && <span>Lampiran: {block.data.lampiran}</span>}
+            {meta.length > 0 && (
+              <div style={{ marginTop: 2, fontSize: 9.5, lineHeight: lh, color: '#475569', whiteSpace: 'pre' }}>
+                {meta.map((k, i) => (
+                  <React.Fragment key={k}>
+                    {i > 0 && '     |     '}
+                    {k === 'hal' ? 'Hal: ' : 'Lampiran: '}{inline(k, k === 'hal' ? 'Perihal' : 'Lampiran')}
+                  </React.Fragment>
+                ))}
               </div>
             )}
           </div>
@@ -1476,185 +1713,266 @@ const SuratAdministrasiView: React.FC<SuratAdministrasiViewProps> = ({ userRole,
       }
 
       case 'paragraf_teks': {
-        return (
+        const paraStyle: React.CSSProperties = {
+          tabSize: 24, // = TAB_SPACES di dynamicBlockRenderer.js
+          fontSize: s.fontSize || 11,
+          fontWeight: s.fontWeight === 'bold' ? 700 : 400,
+          textAlign: s.textAlign || 'justify',
+          lineHeight: s.lineHeight || 1.6,
+          fontStyle: s.fontStyle || 'normal',
+          color: s.color || '#0f172a'
+        };
+        if (!editable || (editingParaId !== block.id && (d.text || '').includes('**'))) return (
           <div
-            key={block.id}
-            className="my-1.5 select-text"
-            style={{
-              marginTop: `${block.style.marginTop || 0}px`,
-              marginBottom: `${block.style.marginBottom || 0}px`,
-              paddingLeft: `${block.style.paddingX || 8}px`,
-              paddingRight: `${block.style.paddingX || 8}px`
-            }}
+            onClick={editable ? () => { setSelectedBlockId(block.id); setEditingParaId(block.id); } : undefined}
+            className={`whitespace-pre-wrap ${editable ? 'rounded-sm hover:ring-1 hover:ring-slate-300 cursor-text' : ''}`}
+            style={paraStyle}
+            title={editable ? 'Klik untuk mengedit (**teks** = tebal)' : undefined}
           >
-            <div
-              style={{
-                fontSize: `${block.style.fontSize || 11}pt`,
-                textAlign: block.style.textAlign || 'justify',
-                lineHeight: block.style.lineHeight || 1.6,
-                fontStyle: block.style.fontStyle || 'normal',
-                color: block.style.color || '#0f172a'
-              }}
-              className="whitespace-pre-line text-slate-800"
-            >
-              {block.data.text || ''}
-            </div>
+            {richText(d.text || '')}
           </div>
+        );
+        return (
+          <textarea
+            {...stop}
+            autoFocus={editingParaId === block.id}
+            rows={1}
+            ref={fitTextarea}
+            value={d.text || ''}
+            onChange={(e) => { updateBlockDataById(block.id, { text: e.target.value }); fitTextarea(e.target); }}
+            onBlur={() => { save(); setEditingParaId(null); }}
+            onKeyDown={(e) => {
+              // Tab = sisipkan tab (rata kolom "Nama<Tab>: ..."), bukan pindah fokus
+              if (e.key !== 'Tab' || e.shiftKey) return;
+              e.preventDefault();
+              const t = e.currentTarget, a = t.selectionStart, z = t.selectionEnd;
+              updateBlockDataById(block.id, { text: t.value.slice(0, a) + '\t' + t.value.slice(z) });
+              requestAnimationFrame(() => t.setSelectionRange(a + 1, a + 1));
+            }}
+            onFocus={() => setSelectedBlockId(block.id)}
+            placeholder="Ketik teks paragraf surat di sini... (Tab untuk merapikan kolom, mis. Nama[Tab]: ...)"
+            className={`${fieldCls} w-full block resize-none overflow-hidden`}
+            style={{ ...paraStyle, fontFamily: 'inherit', fieldSizing: 'content' } as React.CSSProperties}
+          />
         );
       }
 
       case 'tabel_data': {
+        // PDF: judul 10pt + 0.3 baris; header min 22pt; baris min rowHeight (default 28); garis tidak menambah ukuran
         const colWidths = getBlockColumnWidths(block);
-        const rowPaddingY = block.style.paddingY ?? 6;
-        const rowPaddingX = block.style.paddingX ?? 8;
-        const rowMinHeight = block.style.rowHeight ?? 28;
-
+        const headers: string[] = d.headers || [];
+        const rows: string[][] = d.rows || [];
+        const fs = s.fontSize || 9.5;
+        const padY = s.paddingY ?? 6, padX = s.paddingX ?? 8;
+        const rowH = tableRowHeight(s);
+        const sum = colWidths.reduce((a, b) => a + b, 0) || 100;
+        const cell = (bw: number): React.CSSProperties => ({
+          padding: `${padY}px ${padX}px`, verticalAlign: 'top',
+          outline: `${bw}px solid var(--tb)`, outlineOffset: -bw / 2,
+        });
+        const btn = 'px-2 py-0.5 rounded-lg text-[10px] font-bold flex items-center gap-1 transition-colors cursor-pointer';
         return (
-          <div
-            key={block.id}
-            className="my-3 space-y-1 select-text"
-            style={{
-              marginTop: `${block.style.marginTop || 0}px`,
-              marginBottom: `${block.style.marginBottom || 16}px`,
-              paddingLeft: `${block.style.paddingX || 8}px`,
-              paddingRight: `${block.style.paddingX || 8}px`
-            }}
-          >
-            {block.data.tableTitle && (
-              <div className="font-bold text-xs text-slate-800 mb-1">
-                {block.data.tableTitle}
+          <div className="relative" style={{ '--tb': tableBorderColor(s) } as React.CSSProperties}>
+            {editable && isSelected && (
+              <div {...stop} className="absolute bottom-full left-0 right-0 mb-4 z-30 flex flex-wrap items-center justify-between gap-2 bg-white p-1.5 rounded-lg border border-slate-200 shadow-md" style={{ fontFamily: 'Plus Jakarta Sans, sans-serif' }}>
+                <input
+                  type="text"
+                  value={d.tableTitle || ''}
+                  onChange={(e) => updateBlockDataById(block.id, { tableTitle: e.target.value })}
+                  onBlur={save}
+                  placeholder="Judul Tabel Data (Opsional)"
+                  className="font-bold text-xs text-slate-800 bg-transparent border-b border-transparent hover:border-slate-300 focus:border-orange-500 outline-none px-1 py-0.5 flex-1 min-w-[140px]"
+                />
+                <div className="flex items-center flex-wrap gap-1">
+                  <div className="flex items-center bg-white border border-slate-200 rounded-lg p-0.5 text-[10px]">
+                    <span className="px-1 text-[9px] font-bold text-slate-400">Tinggi:</span>
+                    {([['compact', 'Rapat', rowH <= 22], ['normal', 'Standar', rowH > 22 && rowH < 40], ['relaxed', 'Lega', rowH >= 40]] as const).map(([k, label, active]) => (
+                      <button key={k} type="button" onClick={() => handleSetRowDensity(block.id, k)} className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${active ? 'bg-orange-100 text-orange-700' : 'text-slate-500 hover:text-slate-800'}`}>{label}</button>
+                    ))}
+                  </div>
+                  <button type="button" onClick={() => handleDistributeColumnsEvenly(block.id)} className={`${btn} bg-white hover:bg-slate-100 text-slate-600 border border-slate-200`} title="Atur Semua Lebar Kolom Sama Rata">Bagi Rata</button>
+                  <button type="button" onClick={() => handleAddTableColumn(block.id)} className={`${btn} bg-white hover:bg-slate-100 text-slate-700 border border-slate-200`} title="Tambah Kolom Baru"><Plus size={10} /> Kolom</button>
+                  <button type="button" onClick={() => handleAddTableRow(block.id)} className={`${btn} bg-orange-600 hover:bg-orange-700 text-white`} title="Tambah Baris Baru"><Plus size={10} /> Baris</button>
+                </div>
               </div>
             )}
-            <div className="border border-slate-300 rounded-sm overflow-x-auto shadow-2xs">
-              <table
-                className="w-full text-left border-collapse"
-                style={{ tableLayout: 'fixed', fontSize: `${block.style.fontSize || 10}pt` }}
-              >
+            {d.tableTitle && (
+              <div style={{ fontSize: 10, fontWeight: 700, lineHeight: lh, color: '#0f172a', marginBottom: 0.3 * 10 * lh }}>{d.tableTitle}</div>
+            )}
+            {headers.length > 0 && (
+              <table className="w-full" style={{ tableLayout: 'fixed', borderCollapse: 'separate', borderSpacing: 0, lineHeight: lh }}>
                 <colgroup>
-                  {colWidths.map((w, idx) => (
-                    <col key={idx} style={{ width: `${w}%` }} />
-                  ))}
+                  {colWidths.map((w, i) => <col key={i} style={{ width: `${(w / sum) * 100}%` }} />)}
                 </colgroup>
                 <thead>
-                  <tr className="bg-slate-100 border-b border-slate-300 font-bold text-slate-800">
-                    {(block.data.headers || []).map((h: string, hi: number) => (
-                      <th
-                        key={hi}
-                        className="p-1 border-r border-slate-300 last:border-r-0 text-center font-bold text-slate-800"
-                        style={{
-                          paddingTop: `${Math.max(4, rowPaddingY - 2)}px`,
-                          paddingBottom: `${Math.max(4, rowPaddingY - 2)}px`,
-                          paddingLeft: `${rowPaddingX}px`,
-                          paddingRight: `${rowPaddingX}px`
-                        }}
-                      >
-                        {h}
+                  <tr>
+                    {headers.map((h, hi) => (
+                      <th key={hi} className="relative group/th font-bold" style={{ ...cell(0.8), height: 22, background: '#f1f5f9', color: '#0f172a', fontSize: fs, textAlign: 'center' }}>
+                        {editable ? text(h, (v) => {
+                          const next = [...headers]; next[hi] = v;
+                          updateBlockDataById(block.id, { headers: next });
+                        }, { fontWeight: 700 }) : h}
+                        {editable && (
+                          <>
+                            {headers.length > 1 && (
+                              <button
+                                type="button"
+                                {...stop}
+                                onClick={(e) => { e.stopPropagation(); handleDeleteTableColumn(block.id, hi); }}
+                                className="absolute -top-2 right-1 opacity-0 group-hover/th:opacity-100 bg-white text-slate-400 hover:text-red-600 border border-slate-200 p-0.5 rounded shadow-sm z-20"
+                                title={`Hapus Kolom "${h || `Kolom ${hi + 1}`}"`}
+                              >
+                                <Trash2 size={10} />
+                              </button>
+                            )}
+                            <span className="absolute left-0 right-0 -bottom-3 text-center text-[8px] font-mono font-normal text-slate-400 opacity-0 group-hover/th:opacity-100 pointer-events-none">{colWidths[hi]}%</span>
+                            <div
+                              draggable={false}
+                              onMouseDown={(e) => handleStartColResize(e, block.id, hi)}
+                              className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-orange-500 group-hover/th:bg-slate-300/70 z-20"
+                              title="Tarik ke kiri/kanan untuk mengubah lebar kolom"
+                            />
+                          </>
+                        )}
                       </th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
-                  {(block.data.rows || []).map((row: string[], ri: number) => (
-                    <tr
-                      key={ri}
-                      className="border-b border-slate-200 last:border-b-0"
-                      style={{ height: `${rowMinHeight}px` }}
-                    >
-                      {row.map((cell: string, ci: number) => (
+                  {rows.map((row, ri) => (
+                    <tr key={ri} className="group/tr">
+                      {headers.map((_, ci) => (
                         <td
                           key={ci}
-                          className="p-1 border-r border-slate-200 last:border-r-0 text-slate-700"
+                          className="relative"
                           style={{
-                            height: `${rowMinHeight}px`,
-                            paddingTop: `${rowPaddingY}px`,
-                            paddingBottom: `${rowPaddingY}px`,
-                            paddingLeft: `${rowPaddingX}px`,
-                            paddingRight: `${rowPaddingX}px`
+                            ...cell(0.6), height: rowH, fontSize: fs - 0.5, color: '#334155',
+                            background: ri % 2 ? '#f8fafc' : undefined,
+                            textAlign: ci === 0 && (colWidths[ci] / sum) * usableWidth < 45 ? 'center' : 'left'
                           }}
                         >
-                          {cell}
+                          {editable ? text(row[ci] || '', (v) => {
+                            const next = rows.map((r, rIdx) => rIdx === ri ? Object.assign([...r], { [ci]: v }) : r);
+                            updateBlockDataById(block.id, { rows: next });
+                          }, {}) : row[ci]}
+                          {/* Tombol hapus baris di luar tabel (di margin kanan), tidak memakan lebar kolom */}
+                          {editable && ci === headers.length - 1 && rows.length > 1 && (
+                            <button
+                              type="button"
+                              {...stop}
+                              onClick={(e) => { e.stopPropagation(); handleDeleteTableRow(block.id, ri); }}
+                              className="absolute left-full top-1/2 -translate-y-1/2 ml-1.5 opacity-0 group-hover/tr:opacity-100 text-slate-400 hover:text-red-600 hover:bg-red-50 p-1 rounded-md"
+                              title={`Hapus Baris #${ri + 1}`}
+                            >
+                              <Trash2 size={12} />
+                            </button>
+                          )}
                         </td>
                       ))}
                     </tr>
                   ))}
                 </tbody>
               </table>
-            </div>
+            )}
           </div>
         );
       }
 
       case 'garis_pembatas': {
+        // PDF: 4pt + garis + 4pt; style.width = panjang garis dari kiri
+        const t = s.borderThickness || 1;
         return (
-          <div
-            key={block.id}
-            className="py-1"
-            style={{
-              marginTop: `${block.style.marginTop || 0}px`,
-              marginBottom: `${block.style.marginBottom || 0}px`
-            }}
-          >
-            <hr
-              style={{
-                borderColor: block.style.borderColor || '#94a3b8',
-                borderTopWidth: `${block.style.borderWidth || 1}px`,
-                borderStyle: block.style.borderStyle || 'solid'
-              }}
-            />
+          <div style={{ padding: '4px 0' }}>
+            <div style={{ height: t, background: s.borderColor || '#cbd5e1', width: s.width ? Math.min(s.width, usableWidth) : '100%' }} />
           </div>
         );
       }
 
       case 'tanda_tangan': {
-        const signatureUrl = block.data.signatureUrl;
+        const fs = s.fontSize || 11;
+        const sigH = signatureImgHeight(s);
+        const center = s.textAlign === 'center';
+        const sigField = (key: string, placeholder: string, style: React.CSSProperties = {}) =>
+          field(key, { lineHeight: 1.3, ...style }, placeholder);
         return (
-          <div
-            key={block.id}
-            className="my-3 select-text"
-            style={{
-              marginTop: `${block.style.marginTop || 0}px`,
-              marginBottom: `${block.style.marginBottom || 0}px`,
-              paddingLeft: `${block.style.paddingX || 8}px`,
-              paddingRight: `${block.style.paddingX || 8}px`
-            }}
-          >
-            <div className="flex justify-end">
-              <div className="w-56 text-center space-y-1">
-                {block.data.cityDate && (
-                  <div className="text-xs text-slate-700">{block.data.cityDate}</div>
-                )}
-                <div className="text-xs font-semibold text-slate-800">
-                  {block.data.salutation || 'Hormat kami,'}
-                </div>
-                <div className="h-16 flex items-center justify-center my-1">
-                  {signatureUrl ? (
-                    <img src={signatureUrl} alt="Tanda Tangan" className="h-14 object-contain" />
-                  ) : (
-                    <div className="text-[10px] text-slate-400 italic">
-                      [Tanda Tangan Resmi]
-                    </div>
-                  )}
-                </div>
-                <div className="font-bold text-xs text-slate-900 underline">
-                  {block.data.name || '(Nama Lengkap)'}
-                </div>
-                {block.data.nip && (
-                  <div className="text-[10px] text-slate-500">NIP/NIDN: {block.data.nip}</div>
-                )}
-                {block.data.role && (
-                  <div className="text-[10px] text-slate-600 font-medium">{block.data.role}</div>
+          <div style={{ fontSize: fs, lineHeight: 1.3, color: '#0f172a' }}>
+            <div style={signatureBoxStyle(s.textAlign, s.width)}>
+              {shown('cityDate') && sigField('cityDate', 'Bandung, 16 Oktober 2026')}
+              {shown('salutation') && sigField('salutation', 'Hormat Saya,')}
+
+              {/* Slot tanda tangan: 4 + tinggi gambar + 4, sama dengan PDF */}
+              <div
+                className={`flex items-center ${center ? 'justify-center' : 'justify-start'}`}
+                style={{ height: sigH + 8 }}
+                {...(editable ? {
+                  ...stop,
+                  onDragOver: (e: React.DragEvent) => { e.preventDefault(); e.stopPropagation(); },
+                  onDrop: (e: React.DragEvent) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (e.dataTransfer.files?.[0]) handleProcessSignatureFile(e.dataTransfer.files[0], block.id);
+                  }
+                } : {})}
+              >
+                {d.signatureUrl ? (
+                  <div className="relative group/sig h-full flex items-center">
+                    <img src={d.signatureUrl} alt="Tanda Tangan Digital" style={{ height: sigH, width: 'auto', maxWidth: '100%' }} className="object-contain" />
+                    {editable && (
+                      <>
+                        <div className="absolute inset-0 bg-slate-900/60 rounded-lg opacity-0 group-hover/sig:opacity-100 transition-opacity flex items-center justify-center gap-1">
+                          <label className="px-2 py-1 bg-white hover:bg-orange-50 text-slate-800 rounded-md text-[9px] font-bold flex items-center gap-1 cursor-pointer">
+                            <Upload size={10} className="text-orange-600" /> Ganti
+                            <input type="file" accept="image/*" className="hidden" onChange={(e) => e.target.files?.[0] && handleProcessSignatureFile(e.target.files[0], block.id)} />
+                          </label>
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); updateBlockDataById(block.id, { signatureUrl: '' }, true); }}
+                            className="px-2 py-1 bg-red-600 hover:bg-red-700 text-white rounded-md text-[9px] font-bold flex items-center gap-1"
+                          >
+                            <Trash2 size={10} /> Hapus
+                          </button>
+                        </div>
+                        <div
+                          draggable={false}
+                          onMouseDown={(e) => handleStartSignatureResize(e, block)}
+                          className="absolute -right-1.5 -bottom-1.5 w-3.5 h-3.5 bg-orange-600 border-2 border-white rounded-sm cursor-nwse-resize shadow z-10 opacity-0 group-hover/sig:opacity-100"
+                          title={`Tarik untuk ubah ukuran (${sigH}pt)`}
+                        />
+                      </>
+                    )}
+                  </div>
+                ) : editable && (
+                  <label className="h-full w-[160px] border-2 border-dashed border-orange-300 hover:border-orange-500 bg-orange-50/40 hover:bg-orange-50/80 rounded-lg flex flex-col items-center justify-center cursor-pointer transition-all text-center">
+                    <Upload size={13} className="text-orange-600" />
+                    <span className="text-[9px] font-bold text-slate-700">Unggah / seret tanda tangan</span>
+                    <input type="file" accept="image/*" className="hidden" onChange={(e) => e.target.files?.[0] && handleProcessSignatureFile(e.target.files[0], block.id)} />
+                  </label>
                 )}
               </div>
+
+              {sigField('name', 'Nama Lengkap & Gelar', { fontWeight: 700, textDecoration: s.signatureLine ? 'none' : 'underline' })}
+              {/* signatureLine: garis 0.75pt selebar blok + jarak 2pt (PDF) */}
+              {s.signatureLine && <div style={{ height: 0.75, marginBottom: 1.25, background: '#231f20' }} />}
+              {shown('nip') && <div>NIP. {inline('nip', '25850011')}</div>}
+              {shown('role') && sigField('role', 'Jabatan Resmi')}
             </div>
           </div>
         );
       }
 
+      case 'spasi_kosong':
+        return (
+          <div style={{ height: s.height || 24 }} className="w-full flex items-center justify-center">
+            {editable && isSelected && (
+              <span className="text-[9px] font-mono text-slate-400">Spasi ({s.height || 24}px)</span>
+            )}
+          </div>
+        );
+
       default:
         return null;
     }
   };
-
   // ───────────────────────────────────────────────────────────────────────────
   // ACCESS GUARD: MAHASISWA (STUDENT) DILARANG MENGAKSES SURAT ADMINISTRASI
   // ───────────────────────────────────────────────────────────────────────────
@@ -1739,7 +2057,7 @@ const SuratAdministrasiView: React.FC<SuratAdministrasiViewProps> = ({ userRole,
         </div>
 
         {/* Gallery Cards Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-6">
           {visibleTemplates.map((def) => {
             const IconComponent = def.icon;
             return (
@@ -2185,7 +2503,7 @@ const SuratAdministrasiView: React.FC<SuratAdministrasiViewProps> = ({ userRole,
 
           <div className="flex items-center bg-slate-100 rounded-xl p-0.5">
             <button
-              onClick={() => setZoom(prev => Math.max(40, prev - 10))}
+              onClick={() => setZoom(prev => clampZoom(prev - 10))}
               className="p-1 hover:bg-white rounded-md text-slate-600"
               title="Perkecil"
             >
@@ -2195,7 +2513,7 @@ const SuratAdministrasiView: React.FC<SuratAdministrasiViewProps> = ({ userRole,
               {zoom}%
             </span>
             <button
-              onClick={() => setZoom(prev => Math.min(150, prev + 10))}
+              onClick={() => setZoom(prev => clampZoom(prev + 10))}
               className="p-1 hover:bg-white rounded-md text-slate-600"
               title="Perbesar"
             >
@@ -2214,10 +2532,22 @@ const SuratAdministrasiView: React.FC<SuratAdministrasiViewProps> = ({ userRole,
           </button>
 
           <button
-            onClick={() => setZoom(75)}
-            className="px-2 py-1 text-[11px] font-bold text-slate-400 hover:text-slate-700 transition-colors"
+            onClick={fitZoom}
+            className="px-2 py-1 text-[11px] font-bold text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition-colors"
+            title="Sesuaikan kertas dengan lebar area kerja (Ctrl + scroll untuk zoom)"
           >
-            Reset
+            Pas Lebar
+          </button>
+
+          <button
+            onClick={() => setShowSidePanels(v => !v)}
+            className={`px-2.5 py-1 rounded-xl text-[11px] font-bold flex items-center gap-1 transition-colors ${
+              showSidePanels ? 'bg-slate-100 text-slate-500 hover:bg-slate-200' : 'bg-orange-50 text-orange-600 border border-orange-200'
+            }`}
+            title="Sembunyikan/tampilkan panel samping agar kanvas lebih lebar"
+          >
+            {showSidePanels ? <Maximize2 size={13} /> : <Minimize2 size={13} />}
+            <span>{showSidePanels ? 'Kanvas Penuh' : 'Tampilkan Panel'}</span>
           </button>
 
           {/* Page Counter & Add Page Quick Button */}
@@ -2265,7 +2595,7 @@ const SuratAdministrasiView: React.FC<SuratAdministrasiViewProps> = ({ userRole,
       {/* ─── 3. THREE-PANEL WORKSPACE ───────────────────────────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
         {/* ─── A. LEFT PANEL: ELEMEN DOKUMEN & LAYER ────────────────────────── */}
-        <div className="lg:col-span-3 bg-white rounded-2xl border border-slate-200/80 p-4 shadow-sm space-y-4 max-h-[calc(100vh-230px)] overflow-y-auto">
+        <div className={`${showSidePanels ? "lg:col-span-3 xl:col-span-2" : "hidden"} bg-white rounded-2xl border border-slate-200/80 p-4 shadow-sm space-y-4 max-h-[calc(100vh-130px)] overflow-y-auto`}>
           {leftTab === 'ELEMEN' ? (
             <>
               <div className="flex items-center justify-between border-b border-slate-100 pb-2">
@@ -2380,10 +2710,10 @@ const SuratAdministrasiView: React.FC<SuratAdministrasiViewProps> = ({ userRole,
         </div>
 
         {/* ─── B. CENTER CANVAS: INTERACTIVE A4 DOCUMENT SHEET ───────────────── */}
-        <div className="lg:col-span-6 bg-slate-100/90 rounded-2xl border border-slate-200/80 p-4 sm:p-6 overflow-auto max-h-[calc(100vh-230px)] flex justify-center items-start min-h-[580px] relative">
+        <div ref={canvasRef} className={`${showSidePanels ? "lg:col-span-6 xl:col-span-7" : "lg:col-span-12"} bg-slate-100/90 rounded-2xl border border-slate-200/80 p-3 sm:p-4 overflow-auto max-h-[calc(100vh-130px)] min-h-[580px] relative`}>
           {editorMode === 'visual' ? (
             /* Visual Interactive Canvas with Multi-Page Support */
-            <div className="flex flex-col items-center gap-10 w-full py-4">
+            <div className="flex flex-col items-center gap-10 min-w-full w-max py-4 px-8">
               {Array.from({ length: currentPagesCount }, (_, idx) => idx + 1).map((pageNum) => {
                 const pageBlocks = currentBlocks.filter(b => (b.pageNumber || 1) === pageNum);
                 const isCurrentActivePage = activePageNumber === pageNum;
@@ -2438,16 +2768,18 @@ const SuratAdministrasiView: React.FC<SuratAdministrasiViewProps> = ({ userRole,
                           handleDropOnPage(e, pageNum);
                         }
                       }}
-                      style={{
-                        transform: `scale(${zoom / 100})`,
-                        transformOrigin: 'top center',
-                        width: paperOrientation === 'landscape' ? '842px' : '595px',
-                        minHeight: paperOrientation === 'landscape' ? '595px' : '842px'
-                      }}
-                      className={`bg-white rounded-sm shadow-2xl transition-transform duration-150 p-10 relative text-slate-900 border border-slate-200/70 shrink-0 ${
+                      style={paperStyle(zoom)}
+                      className={`bg-white rounded-sm shadow-2xl relative text-slate-900 outline outline-1 outline-slate-200/70 shrink-0 ${
                         showGrid ? 'bg-[radial-gradient(#e2e8f0_1px,transparent_1px)] bg-[size:16px_16px]' : ''
                       } ${isCurrentActivePage ? 'ring-2 ring-orange-500/50' : ''}`}
                     >
+                      {/* Batas bawah area cetak PDF: isi yang melewati garis ini pindah ke halaman berikutnya di PDF */}
+                      <div
+                        className="absolute inset-x-0 border-t border-dashed border-red-300/80 pointer-events-none"
+                        style={{ top: (paperOrientation === 'landscape' ? 595 : 842) - (isCert ? 30 : paperOrientation === 'landscape' ? 40 : 50) }}
+                        title="Batas bawah halaman PDF"
+                      />
+                      {pageBlocks.filter(b => b.type === 'gambar').map(b => renderFloatingImage(b, true, pageNum))}
                       {pageBlocks.length === 0 ? (
                         <div
                           onDragOver={(e) => e.preventDefault()}
@@ -2469,8 +2801,9 @@ const SuratAdministrasiView: React.FC<SuratAdministrasiViewProps> = ({ userRole,
                           </button>
                         </div>
                       ) : (
-                        <div className="space-y-2">
-                          {pageBlocks.map((block) => {
+                        // flex-col: margin antar blok dijumlah (tidak "collapse"), sama seperti PDF
+                        <div className="flex flex-col">
+                          {pageBlocks.filter(b => b.type !== 'gambar').map((block) => {
                             const index = currentBlocks.findIndex(b => b.id === block.id);
                             const isSelected = selectedBlockId === block.id;
                             const isDragged = draggedBlockIndex === index;
@@ -2488,18 +2821,20 @@ const SuratAdministrasiView: React.FC<SuratAdministrasiViewProps> = ({ userRole,
                                   setSelectedBlockId(block.id);
                                   setActivePageNumber(pageNum);
                                 }}
-                      className={`relative group rounded-lg p-2.5 transition-all cursor-pointer ${
+                      className={`relative group rounded-sm transition-shadow cursor-pointer ${
                         isSelected
                           ? 'ring-2 ring-orange-500 bg-orange-50/20'
                           : 'hover:ring-1 hover:ring-slate-300'
                       } ${isDragged ? 'opacity-40' : ''} ${
-                        isDragOver ? 'border-t-2 border-orange-500' : ''
+                        isDragOver ? 'shadow-[0_-2px_0_#f97316]' : ''
                       }`}
                       style={{
-                        marginTop: `${block.style.marginTop || 0}px`,
-                        marginBottom: `${block.style.marginBottom || 0}px`,
+                        ...blockMargins(block),
                         paddingLeft: `${block.style.paddingX || 8}px`,
-                        paddingRight: `${block.style.paddingX || 8}px`
+                        paddingRight: `${block.style.paddingX || 8}px`,
+                        // Padding sorotan tidak menggeser isi dari margin kertas (agar sejajar PDF)
+                        marginLeft: `-${block.style.paddingX || 8}px`,
+                        marginRight: `-${block.style.paddingX || 8}px`
                       }}
                     >
                       {/* Drag Handle & Quick Actions on Left & Right */}
@@ -2513,631 +2848,8 @@ const SuratAdministrasiView: React.FC<SuratAdministrasiViewProps> = ({ userRole,
                         </div>
                       )}
 
-                      {/* Content Rendering By Block Type (Interactive & Direct In-Place Editable) */}
-                      {block.type === 'kop_surat' && (
-                        <div className="text-center relative pb-2" style={{ textAlign: block.style.textAlign || 'center' }}>
-                          <div className="flex items-center justify-center gap-3 mb-1">
-                            {/* Logo with upload trigger */}
-                            <div className="relative group/logo shrink-0">
-                              {block.data.logoUrl ? (
-                                <img src={block.data.logoUrl} alt="Logo" className="w-12 h-12 object-contain" />
-                              ) : (
-                                <div className="w-10 h-10 rounded-xl bg-orange-50 border border-orange-200 flex items-center justify-center text-orange-600 font-black text-xs">
-                                  Ko+Lab
-                                </div>
-                              )}
-                              <label
-                                draggable={false}
-                                onMouseDown={(e) => e.stopPropagation()}
-                                className="absolute inset-0 bg-slate-900/60 backdrop-blur-[1px] rounded-xl opacity-0 group-hover/logo:opacity-100 transition-opacity flex items-center justify-center cursor-pointer text-white text-[9px] font-bold"
-                                title="Klik untuk Ganti Logo Kop Surat"
-                              >
-                                <Upload size={12} />
-                                <input
-                                  type="file"
-                                  accept="image/*"
-                                  className="hidden"
-                                  onChange={(e) => {
-                                    if (e.target.files && e.target.files[0]) {
-                                      handleProcessLogoFile(e.target.files[0], block.id);
-                                    }
-                                  }}
-                                />
-                              </label>
-                            </div>
-
-                            <div className="flex-1 max-w-lg">
-                              <input
-                                type="text"
-                                draggable={false}
-                                onMouseDown={(e) => e.stopPropagation()}
-                                value={block.data.institution || ''}
-                                onChange={(e) => updateBlockDataById(block.id, { institution: e.target.value })}
-                                onBlur={() => updateBlocks(currentBlocks)}
-                                className="w-full text-center bg-transparent border-b border-transparent hover:border-slate-300 focus:border-orange-500 focus:bg-white/90 outline-none font-bold tracking-tight text-slate-900 rounded px-1 transition-all"
-                                style={{ fontSize: `${block.style.fontSize || 12}pt` }}
-                                placeholder="Nama Institusi / Lembaga"
-                              />
-                              <input
-                                type="text"
-                                draggable={false}
-                                onMouseDown={(e) => e.stopPropagation()}
-                                value={block.data.faculty || ''}
-                                onChange={(e) => updateBlockDataById(block.id, { faculty: e.target.value })}
-                                onBlur={() => updateBlocks(currentBlocks)}
-                                className="w-full text-center bg-transparent border-b border-transparent hover:border-slate-300 focus:border-orange-500 focus:bg-white/90 outline-none text-[10px] font-semibold text-slate-700 tracking-wide rounded px-1 transition-all"
-                                placeholder="Fakultas / Universitas"
-                              />
-                            </div>
-                          </div>
-
-                          <textarea
-                            rows={2}
-                            draggable={false}
-                            onMouseDown={(e) => e.stopPropagation()}
-                            value={block.data.address || ''}
-                            onChange={(e) => updateBlockDataById(block.id, { address: e.target.value })}
-                            onBlur={() => updateBlocks(currentBlocks)}
-                            className="w-full text-center bg-transparent border border-transparent hover:border-slate-300 focus:border-orange-500 focus:bg-white/90 outline-none text-[9px] text-slate-500 resize-none rounded p-1 transition-all mt-1 max-w-md mx-auto block"
-                            placeholder="Alamat & Kontak Lembaga"
-                          />
-
-                          {/* Decorative double line for official Telkom University header */}
-                          <div className="mt-2 space-y-0.5">
-                            <hr className="border-t border-slate-900" />
-                            <hr className="border-t-2 border-slate-900" />
-                          </div>
-                        </div>
-                      )}
-
-                      {block.type === 'judul_surat' && (
-                        <div className="text-center py-2" style={{ textAlign: block.style.textAlign || 'center' }}>
-                          <input
-                            type="text"
-                            draggable={false}
-                            onMouseDown={(e) => e.stopPropagation()}
-                            value={block.data.title || ''}
-                            onChange={(e) => updateBlockDataById(block.id, { title: e.target.value })}
-                            onBlur={() => updateBlocks(currentBlocks)}
-                            className="w-full text-center bg-transparent border-b border-transparent hover:border-slate-300 focus:border-orange-500 focus:bg-white/90 outline-none font-black text-slate-900 tracking-tight rounded px-1 transition-all"
-                            style={{
-                              fontSize: `${block.style.fontSize || 13}pt`,
-                              fontWeight: block.style.fontWeight || 'bold'
-                            }}
-                            placeholder="JUDUL SURAT RESMI"
-                          />
-
-                          <div className="flex items-center justify-center gap-1.5 text-[11px] font-semibold text-slate-600 mt-1">
-                            <span>Nomor:</span>
-                            <input
-                              type="text"
-                              draggable={false}
-                              onMouseDown={(e) => e.stopPropagation()}
-                              value={block.data.nomor || ''}
-                              onChange={(e) => updateBlockDataById(block.id, { nomor: e.target.value })}
-                              onBlur={() => updateBlocks(currentBlocks)}
-                              placeholder="001/SKET/RA-KOLABFIT/2026"
-                              className="bg-transparent border-b border-transparent hover:border-slate-300 focus:border-orange-500 focus:bg-white/90 outline-none text-slate-700 font-semibold text-center px-1.5 py-0.5 rounded transition-all min-w-[240px]"
-                            />
-                          </div>
-
-                          {(block.data.hal !== undefined || block.data.lampiran !== undefined) && (
-                            <div className="text-[10px] text-slate-600 font-medium mt-1 flex justify-center items-center gap-4">
-                              <div className="flex items-center gap-1">
-                                <span>Hal:</span>
-                                <input
-                                  type="text"
-                                  draggable={false}
-                                  onMouseDown={(e) => e.stopPropagation()}
-                                  value={block.data.hal || ''}
-                                  onChange={(e) => updateBlockDataById(block.id, { hal: e.target.value })}
-                                  onBlur={() => updateBlocks(currentBlocks)}
-                                  placeholder="Perihal"
-                                  className="bg-transparent border-b border-transparent hover:border-slate-300 focus:border-orange-500 focus:bg-white/90 outline-none text-slate-700 px-1 py-0.5 rounded transition-all min-w-[140px]"
-                                />
-                              </div>
-                              <div className="flex items-center gap-1">
-                                <span>Lampiran:</span>
-                                <input
-                                  type="text"
-                                  draggable={false}
-                                  onMouseDown={(e) => e.stopPropagation()}
-                                  value={block.data.lampiran || ''}
-                                  onChange={(e) => updateBlockDataById(block.id, { lampiran: e.target.value })}
-                                  onBlur={() => updateBlocks(currentBlocks)}
-                                  placeholder="Lampiran"
-                                  className="bg-transparent border-b border-transparent hover:border-slate-300 focus:border-orange-500 focus:bg-white/90 outline-none text-slate-700 px-1 py-0.5 rounded transition-all min-w-[100px]"
-                                />
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      )}
-
-                      {block.type === 'paragraf_teks' && (
-                        <div className="relative group/para">
-                          <textarea
-                            draggable={false}
-                            onMouseDown={(e) => e.stopPropagation()}
-                            value={block.data.text || ''}
-                            onChange={(e) => {
-                              updateBlockDataById(block.id, { text: e.target.value });
-                              e.target.style.height = 'auto';
-                              e.target.style.height = `${e.target.scrollHeight}px`;
-                            }}
-                            onBlur={() => updateBlocks(currentBlocks)}
-                            onFocus={(e) => {
-                              setSelectedBlockId(block.id);
-                              e.target.style.height = 'auto';
-                              e.target.style.height = `${e.target.scrollHeight}px`;
-                            }}
-                            ref={(el) => {
-                              if (el) {
-                                el.style.height = 'auto';
-                                el.style.height = `${el.scrollHeight}px`;
-                              }
-                            }}
-                            placeholder="Ketik teks paragraf surat di sini..."
-                            className="w-full bg-transparent border border-transparent hover:border-slate-200 focus:border-orange-400 focus:bg-white/95 focus:ring-2 focus:ring-orange-200 outline-none rounded p-1.5 transition-all overflow-hidden resize-none leading-relaxed block"
-                            style={{
-                              fontSize: `${block.style.fontSize || 11}pt`,
-                              textAlign: block.style.textAlign || 'justify',
-                              lineHeight: block.style.lineHeight || 1.6,
-                              fontStyle: block.style.fontStyle || 'normal',
-                              color: block.style.color || '#0f172a'
-                            }}
-                          />
-                        </div>
-                      )}
-
-                      {block.type === 'tabel_data' && (() => {
-                        const colWidths = getBlockColumnWidths(block);
-                        const rowPaddingY = block.style.paddingY ?? 6;
-                        const rowPaddingX = block.style.paddingX ?? 8;
-                        const rowMinHeight = block.style.rowHeight ?? 28;
-
-                        return (
-                          <div className="my-2 space-y-1.5">
-                            {/* Table quick toolbar */}
-                            <div className="flex flex-wrap items-center justify-between gap-2 bg-slate-50/80 p-1.5 rounded-lg border border-slate-200/60">
-                              <input
-                                type="text"
-                                draggable={false}
-                                onMouseDown={(e) => e.stopPropagation()}
-                                value={block.data.tableTitle || ''}
-                                onChange={(e) => updateBlockDataById(block.id, { tableTitle: e.target.value })}
-                                onBlur={() => updateBlocks(currentBlocks)}
-                                placeholder="Judul Tabel Data (Opsional)"
-                                className="font-bold text-xs text-slate-800 bg-transparent border-b border-transparent hover:border-slate-300 focus:border-orange-500 focus:bg-white outline-none px-1 py-0.5 rounded transition-all flex-1 min-w-[160px]"
-                              />
-
-                              <div className="flex items-center flex-wrap gap-1">
-                                {/* Density selector */}
-                                <div className="flex items-center bg-white border border-slate-200 rounded-lg p-0.5 text-[10px]">
-                                  <span className="px-1 text-[9px] font-bold text-slate-400">Tinggi:</span>
-                                  <button
-                                    type="button"
-                                    draggable={false}
-                                    onMouseDown={(e) => e.stopPropagation()}
-                                    onClick={() => handleSetRowDensity(block.id, 'compact')}
-                                    className={`px-1.5 py-0.5 rounded text-[10px] font-bold transition-colors ${
-                                      rowMinHeight <= 22 ? 'bg-orange-100 text-orange-700' : 'text-slate-500 hover:text-slate-800'
-                                    }`}
-                                    title="Tinggi Baris Rapat (20px)"
-                                  >
-                                    Rapat
-                                  </button>
-                                  <button
-                                    type="button"
-                                    draggable={false}
-                                    onMouseDown={(e) => e.stopPropagation()}
-                                    onClick={() => handleSetRowDensity(block.id, 'normal')}
-                                    className={`px-1.5 py-0.5 rounded text-[10px] font-bold transition-colors ${
-                                      rowMinHeight > 22 && rowMinHeight < 40 ? 'bg-orange-100 text-orange-700' : 'text-slate-500 hover:text-slate-800'
-                                    }`}
-                                    title="Tinggi Baris Standar (28px)"
-                                  >
-                                    Standar
-                                  </button>
-                                  <button
-                                    type="button"
-                                    draggable={false}
-                                    onMouseDown={(e) => e.stopPropagation()}
-                                    onClick={() => handleSetRowDensity(block.id, 'relaxed')}
-                                    className={`px-1.5 py-0.5 rounded text-[10px] font-bold transition-colors ${
-                                      rowMinHeight >= 40 ? 'bg-orange-100 text-orange-700' : 'text-slate-500 hover:text-slate-800'
-                                    }`}
-                                    title="Tinggi Baris Lega (44px)"
-                                  >
-                                    Lega
-                                  </button>
-                                </div>
-
-                                {/* Equalize Columns */}
-                                <button
-                                  type="button"
-                                  draggable={false}
-                                  onMouseDown={(e) => e.stopPropagation()}
-                                  onClick={() => handleDistributeColumnsEvenly(block.id)}
-                                  className="px-2 py-0.5 bg-white hover:bg-slate-100 text-slate-600 border border-slate-200 rounded-lg text-[10px] font-bold transition-colors cursor-pointer"
-                                  title="Atur Semua Lebar Kolom Sama Rata"
-                                >
-                                  Bagi Rata
-                                </button>
-
-                                <button
-                                  type="button"
-                                  draggable={false}
-                                  onMouseDown={(e) => e.stopPropagation()}
-                                  onClick={() => handleAddTableColumn(block.id)}
-                                  className="px-2 py-0.5 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-lg text-[10px] font-bold flex items-center gap-1 transition-colors cursor-pointer"
-                                  title="Tambah Kolom Baru"
-                                >
-                                  <Plus size={10} /> Kolom
-                                </button>
-
-                                <button
-                                  type="button"
-                                  draggable={false}
-                                  onMouseDown={(e) => e.stopPropagation()}
-                                  onClick={() => handleAddTableRow(block.id)}
-                                  className="px-2 py-0.5 bg-orange-600 hover:bg-orange-700 text-white rounded-lg text-[10px] font-bold flex items-center gap-1 transition-colors cursor-pointer shadow-xs"
-                                  title="Tambah Baris Baru"
-                                >
-                                  <Plus size={10} /> Baris
-                                </button>
-                              </div>
-                            </div>
-
-                            {/* Table */}
-                            <div className="border border-slate-300 rounded-sm overflow-x-auto shadow-2xs">
-                              <table className="w-full text-left border-collapse" style={{ tableLayout: 'fixed', fontSize: `${block.style.fontSize || 10}pt` }}>
-                                <colgroup>
-                                  {colWidths.map((w, idx) => (
-                                    <col key={idx} style={{ width: `${w}%` }} />
-                                  ))}
-                                  <col style={{ width: '44px' }} />
-                                </colgroup>
-                                <thead>
-                                  <tr className="bg-slate-100 border-b border-slate-300 font-bold text-slate-800">
-                                    {(block.data.headers || []).map((h: string, hi: number) => (
-                                      <th
-                                        key={hi}
-                                        className="p-1 border-r border-slate-300 last:border-r-0 relative group/th select-none"
-                                        style={{
-                                          paddingTop: `${Math.max(4, rowPaddingY - 2)}px`,
-                                          paddingBottom: `${Math.max(4, rowPaddingY - 2)}px`,
-                                          paddingLeft: `${rowPaddingX}px`,
-                                          paddingRight: `${rowPaddingX}px`
-                                        }}
-                                      >
-                                        <div className="flex items-center justify-between gap-1">
-                                          <input
-                                            type="text"
-                                            draggable={false}
-                                            onMouseDown={(e) => e.stopPropagation()}
-                                            value={h}
-                                            onChange={(e) => {
-                                              const nextHeaders = [...(block.data.headers || [])];
-                                              nextHeaders[hi] = e.target.value;
-                                              updateBlockDataById(block.id, { headers: nextHeaders });
-                                            }}
-                                            onBlur={() => updateBlocks(currentBlocks)}
-                                            className="w-full bg-transparent font-bold text-slate-800 text-center outline-none border-b border-transparent hover:border-slate-400 focus:border-orange-500 focus:bg-white/90 px-1 py-0.5 rounded transition-all"
-                                          />
-
-                                          {/* Delete Column button */}
-                                          {block.data.headers.length > 1 && (
-                                            <button
-                                              type="button"
-                                              draggable={false}
-                                              onMouseDown={(e) => e.stopPropagation()}
-                                              onClick={(e) => {
-                                                e.stopPropagation();
-                                                handleDeleteTableColumn(block.id, hi);
-                                              }}
-                                              className="opacity-0 group-hover/th:opacity-100 text-slate-400 hover:text-red-600 hover:bg-red-50 p-1 rounded transition-all cursor-pointer shrink-0"
-                                              title={`Hapus Kolom "${h || `Kolom ${hi + 1}`}"`}
-                                            >
-                                              <Trash2 size={11} />
-                                            </button>
-                                          )}
-                                        </div>
-
-                                        {/* Width % Badge */}
-                                        <div className="flex justify-center opacity-0 group-hover/th:opacity-100 transition-opacity">
-                                          <span className="text-[8px] font-mono text-slate-400">
-                                            {colWidths[hi]}%
-                                          </span>
-                                        </div>
-
-                                        {/* Interactive Column Drag Resizer Handle */}
-                                        <div
-                                          draggable={false}
-                                          onMouseDown={(e) => handleStartColResize(e, block.id, hi)}
-                                          className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-orange-500 bg-transparent group-hover/th:bg-slate-300 transition-colors z-20"
-                                          title="Tarik ke kiri/kanan untuk mengubah lebar kolom"
-                                        />
-                                      </th>
-                                    ))}
-                                    <th className="w-11 p-1 text-center bg-slate-100 text-slate-400 text-[10px] font-bold">
-                                      Aksi
-                                    </th>
-                                  </tr>
-                                </thead>
-                                <tbody>
-                                  {(block.data.rows || []).map((row: string[], ri: number) => (
-                                    <tr
-                                      key={ri}
-                                      className="border-b border-slate-200 last:border-b-0 hover:bg-slate-50/60 group/tr transition-colors"
-                                      style={{ minHeight: `${rowMinHeight}px` }}
-                                    >
-                                      {row.map((cell: string, ci: number) => (
-                                        <td
-                                          key={ci}
-                                          className="p-1 border-r border-slate-200 last:border-r-0 text-slate-700"
-                                          style={{
-                                            paddingTop: `${rowPaddingY}px`,
-                                            paddingBottom: `${rowPaddingY}px`,
-                                            paddingLeft: `${rowPaddingX}px`,
-                                            paddingRight: `${rowPaddingX}px`
-                                          }}
-                                        >
-                                          <input
-                                            type="text"
-                                            draggable={false}
-                                            onMouseDown={(e) => e.stopPropagation()}
-                                            value={cell}
-                                            onChange={(e) => {
-                                              const nextRows = (block.data.rows || []).map((r: string[], rIdx: number) => {
-                                                if (rIdx !== ri) return r;
-                                                const newR = [...r];
-                                                newR[ci] = e.target.value;
-                                                return newR;
-                                              });
-                                              updateBlockDataById(block.id, { rows: nextRows });
-                                            }}
-                                            onBlur={() => updateBlocks(currentBlocks)}
-                                            className="w-full bg-transparent text-slate-700 outline-none border-b border-transparent hover:border-slate-300 focus:border-orange-500 focus:bg-white/90 px-1 py-0.5 rounded transition-all"
-                                          />
-                                        </td>
-                                      ))}
-                                      <td className="w-11 p-1 text-center">
-                                        {(block.data.rows || []).length > 1 && (
-                                          <button
-                                            type="button"
-                                            draggable={false}
-                                            onMouseDown={(e) => e.stopPropagation()}
-                                            onClick={(e) => {
-                                              e.stopPropagation();
-                                              handleDeleteTableRow(block.id, ri);
-                                            }}
-                                            className="opacity-20 group-hover/tr:opacity-100 text-slate-400 hover:text-red-600 hover:bg-red-50 p-1 rounded-md transition-all cursor-pointer"
-                                            title={`Hapus Baris #${ri + 1}`}
-                                          >
-                                            <Trash2 size={12} />
-                                          </button>
-                                        )}
-                                      </td>
-                                    </tr>
-                                  ))}
-                                </tbody>
-                              </table>
-                            </div>
-
-                            {/* Bottom Add Row shortcut button */}
-                            <div className="pt-0.5 flex justify-start">
-                              <button
-                                type="button"
-                                draggable={false}
-                                onMouseDown={(e) => e.stopPropagation()}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleAddTableRow(block.id);
-                                }}
-                                className="text-[10px] font-bold text-orange-600 hover:text-orange-700 hover:bg-orange-50 px-2 py-0.5 rounded flex items-center gap-1 transition-colors cursor-pointer"
-                              >
-                                <Plus size={11} /> Tambah Baris Data
-                              </button>
-                            </div>
-                          </div>
-                        );
-                      })()}
-
-                      {block.type === 'garis_pembatas' && (
-                        <div className="py-1">
-                          <hr
-                            style={{
-                              borderTopWidth: `${block.style.borderThickness || 1}px`,
-                              borderTopColor: block.style.borderColor || '#cbd5e1'
-                            }}
-                          />
-                        </div>
-                      )}
-
-                      {block.type === 'tanda_tangan' && (
-                        <div
-                          className="pt-2 text-slate-800 space-y-1"
-                          style={{
-                            textAlign: block.style.textAlign || 'right',
-                            fontSize: `${block.style.fontSize || 11}pt`
-                          }}
-                        >
-                          {/* City & Date */}
-                          <div className={`flex ${block.style.textAlign === 'center' ? 'justify-center' : block.style.textAlign === 'left' ? 'justify-start' : 'justify-end'}`}>
-                            <input
-                              type="text"
-                              draggable={false}
-                              onMouseDown={(e) => e.stopPropagation()}
-                              value={block.data.cityDate || ''}
-                              onChange={(e) => updateBlockDataById(block.id, { cityDate: e.target.value })}
-                              onBlur={() => updateBlocks(currentBlocks)}
-                              placeholder="Bandung, 16 Oktober 2026"
-                              className="bg-transparent border-b border-transparent hover:border-slate-300 focus:border-orange-500 focus:bg-white/90 outline-none text-[11px] text-slate-600 rounded px-1.5 py-0.5 transition-all"
-                              style={{ textAlign: block.style.textAlign || 'right' }}
-                            />
-                          </div>
-
-                          {/* Salutation */}
-                          <div className={`flex ${block.style.textAlign === 'center' ? 'justify-center' : block.style.textAlign === 'left' ? 'justify-start' : 'justify-end'}`}>
-                            <input
-                              type="text"
-                              draggable={false}
-                              onMouseDown={(e) => e.stopPropagation()}
-                              value={block.data.salutation || ''}
-                              onChange={(e) => updateBlockDataById(block.id, { salutation: e.target.value })}
-                              onBlur={() => updateBlocks(currentBlocks)}
-                              placeholder="Hormat Saya,"
-                              className="bg-transparent border-b border-transparent hover:border-slate-300 focus:border-orange-500 focus:bg-white/90 outline-none text-[11px] font-medium text-slate-800 rounded px-1.5 py-0.5 transition-all"
-                              style={{ textAlign: block.style.textAlign || 'right' }}
-                            />
-                          </div>
-
-                          {/* Digital Signature Slot on Canvas with direct image upload & replace */}
-                          <div className={`my-2 flex ${block.style.textAlign === 'center' ? 'justify-center' : block.style.textAlign === 'left' ? 'justify-start' : 'justify-end'}`}>
-                            {block.data.signatureUrl ? (
-                              <div className="relative group/sig border border-transparent hover:border-orange-300 p-1.5 rounded-xl bg-orange-50/10 transition-all inline-block">
-                                <img
-                                  src={block.data.signatureUrl}
-                                  alt="Tanda Tangan Digital"
-                                  className="h-16 max-w-[220px] object-contain drop-shadow-xs"
-                                />
-                                {/* Quick overlay controls right on canvas */}
-                                <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-[2px] rounded-xl opacity-0 group-hover/sig:opacity-100 transition-opacity flex items-center justify-center gap-2">
-                                  <label
-                                    draggable={false}
-                                    onMouseDown={(e) => e.stopPropagation()}
-                                    className="px-2.5 py-1 bg-white hover:bg-orange-50 text-slate-800 rounded-lg text-[10px] font-bold flex items-center gap-1 cursor-pointer shadow-xs transition-colors"
-                                  >
-                                    <Upload size={11} className="text-orange-600" />
-                                    <span>Ganti</span>
-                                    <input
-                                      type="file"
-                                      accept="image/*"
-                                      className="hidden"
-                                      onChange={(e) => {
-                                        if (e.target.files && e.target.files[0]) {
-                                          handleProcessSignatureFile(e.target.files[0], block.id);
-                                        }
-                                      }}
-                                    />
-                                  </label>
-                                  <button
-                                    type="button"
-                                    draggable={false}
-                                    onMouseDown={(e) => e.stopPropagation()}
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      updateBlockDataById(block.id, { signatureUrl: '' }, true);
-                                      onShowAlert('Tanda Tangan Dihapus', 'Gambar tanda tangan telah dihapus.', 'success');
-                                    }}
-                                    className="px-2.5 py-1 bg-red-600 hover:bg-red-700 text-white rounded-lg text-[10px] font-bold flex items-center gap-1 shadow-xs transition-colors cursor-pointer"
-                                  >
-                                    <Trash2 size={11} />
-                                    <span>Hapus</span>
-                                  </button>
-                                </div>
-                              </div>
-                            ) : (
-                              <div
-                                draggable={false}
-                                onMouseDown={(e) => e.stopPropagation()}
-                                onDragOver={(e) => {
-                                  e.preventDefault();
-                                  e.stopPropagation();
-                                }}
-                                onDrop={(e) => {
-                                  e.preventDefault();
-                                  e.stopPropagation();
-                                  if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-                                    handleProcessSignatureFile(e.dataTransfer.files[0], block.id);
-                                  }
-                                }}
-                                className="relative group/drop"
-                              >
-                                <label className="h-18 w-52 border-2 border-dashed border-orange-300 hover:border-orange-500 bg-orange-50/40 hover:bg-orange-50/80 rounded-xl flex flex-col items-center justify-center gap-1 cursor-pointer transition-all p-2 text-center shadow-xs hover:shadow-sm">
-                                  <Upload size={16} className="text-orange-600 group-hover/drop:scale-110 transition-transform" />
-                                  <span className="text-[10px] font-bold text-slate-800 group-hover/drop:text-orange-700">
-                                    Unggah Tanda Tangan
-                                  </span>
-                                  <span className="text-[8px] text-slate-500 font-medium">
-                                    Klik atau Seret file PNG/JPG ke sini
-                                  </span>
-                                  <input
-                                    type="file"
-                                    accept="image/*"
-                                    className="hidden"
-                                    onChange={(e) => {
-                                      if (e.target.files && e.target.files[0]) {
-                                        handleProcessSignatureFile(e.target.files[0], block.id);
-                                      }
-                                    }}
-                                  />
-                                </label>
-                              </div>
-                            )}
-                          </div>
-
-                          {/* Signer Name */}
-                          <div className={`flex ${block.style.textAlign === 'center' ? 'justify-center' : block.style.textAlign === 'left' ? 'justify-start' : 'justify-end'}`}>
-                            <input
-                              type="text"
-                              draggable={false}
-                              onMouseDown={(e) => e.stopPropagation()}
-                              value={block.data.name || ''}
-                              onChange={(e) => updateBlockDataById(block.id, { name: e.target.value })}
-                              onBlur={() => updateBlocks(currentBlocks)}
-                              placeholder="Nama Lengkap & Gelar"
-                              className="bg-transparent border-b border-transparent hover:border-slate-300 focus:border-orange-500 focus:bg-white/90 outline-none font-bold underline text-slate-900 rounded px-1.5 py-0.5 transition-all min-w-[180px]"
-                              style={{ textAlign: block.style.textAlign || 'right' }}
-                            />
-                          </div>
-
-                          {/* Signer NIP */}
-                          <div className="flex items-center gap-1" style={{ justifyContent: block.style.textAlign === 'center' ? 'center' : block.style.textAlign === 'left' ? 'flex-start' : 'flex-end' }}>
-                            <span className="text-[10px] text-slate-500 font-medium">NIP:</span>
-                            <input
-                              type="text"
-                              draggable={false}
-                              onMouseDown={(e) => e.stopPropagation()}
-                              value={block.data.nip || ''}
-                              onChange={(e) => updateBlockDataById(block.id, { nip: e.target.value })}
-                              onBlur={() => updateBlocks(currentBlocks)}
-                              placeholder="25850011"
-                              className="bg-transparent border-b border-transparent hover:border-slate-300 focus:border-orange-500 focus:bg-white/90 outline-none text-[10px] text-slate-600 rounded px-1 py-0.5 transition-all max-w-[140px]"
-                              style={{ textAlign: block.style.textAlign || 'right' }}
-                            />
-                          </div>
-
-                          {/* Signer Role */}
-                          <div className={`flex ${block.style.textAlign === 'center' ? 'justify-center' : block.style.textAlign === 'left' ? 'justify-start' : 'justify-end'}`}>
-                            <input
-                              type="text"
-                              draggable={false}
-                              onMouseDown={(e) => e.stopPropagation()}
-                              value={block.data.role || ''}
-                              onChange={(e) => updateBlockDataById(block.id, { role: e.target.value })}
-                              onBlur={() => updateBlocks(currentBlocks)}
-                              placeholder="Jabatan Resmi"
-                              className="bg-transparent border-b border-transparent hover:border-slate-300 focus:border-orange-500 focus:bg-white/90 outline-none text-[10px] text-slate-500 rounded px-1.5 py-0.5 transition-all min-w-[200px]"
-                              style={{ textAlign: block.style.textAlign || 'right' }}
-                            />
-                          </div>
-                        </div>
-                      )}
-
-                      {block.type === 'spasi_kosong' && (
-                        <div
-                          style={{ height: `${block.style.height || 24}px` }}
-                          className="w-full flex items-center justify-center group-hover:bg-slate-50 rounded-sm"
-                        >
-                          {isSelected && (
-                            <span className="text-[9px] font-mono text-slate-400">
-                              Spasi ({block.style.height || 24}px)
-                            </span>
-                          )}
-                        </div>
-                      )}
+                      {/* Isi blok: sama dengan layar penuh & PDF */}
+                      {renderBlockContent(block, isSelected, true)}
                     </div>
                   );
                 })}
@@ -3180,7 +2892,7 @@ const SuratAdministrasiView: React.FC<SuratAdministrasiViewProps> = ({ userRole,
         </div>
 
         {/* ─── C. RIGHT PANEL: GAYA, LAYOUT, HALAMAN, FORM ───────────────────── */}
-        <div className="lg:col-span-3 bg-white rounded-2xl border border-slate-200/80 p-4 shadow-sm space-y-4 max-h-[calc(100vh-230px)] overflow-y-auto">
+        <div className={`${showSidePanels ? "lg:col-span-3" : "hidden"} bg-white rounded-2xl border border-slate-200/80 p-4 shadow-sm space-y-4 max-h-[calc(100vh-130px)] overflow-y-auto`}>
           {rightTab === 'HALAMAN' ? (
             /* Dedicated Halaman tab: accessible whether an element is selected or not */
             <div className="space-y-4 text-xs animate-in fade-in duration-200">
@@ -3447,6 +3159,34 @@ const SuratAdministrasiView: React.FC<SuratAdministrasiViewProps> = ({ userRole,
                     <div className="pt-3 border-t border-slate-100 space-y-3">
                       <div>
                         <div className="flex justify-between text-[11px] font-bold text-slate-600 mb-1">
+                          <span>Warna Garis Tabel</span>
+                          <span className="font-mono">{tableBorderColor(selectedBlock.style)}</span>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <input
+                            type="color"
+                            value={tableBorderColor(selectedBlock.style)}
+                            onChange={(e) => updateSelectedStyle({ borderColor: e.target.value })}
+                            className="w-8 h-8 rounded-lg cursor-pointer border border-slate-200 p-0"
+                            title="Pilih warna garis"
+                          />
+                          {[['Hitam', '#000000'], ['Abu Gelap', '#475569'], ['Abu Muda', '#cbd5e1']].map(([label, c]) => (
+                            <button
+                              key={c}
+                              type="button"
+                              onClick={() => updateSelectedStyle({ borderColor: c })}
+                              className={`flex-1 px-1 py-1.5 rounded-lg text-[10px] font-bold flex items-center justify-center gap-1 transition-colors ${
+                                tableBorderColor(selectedBlock.style) === c ? 'bg-orange-100 text-orange-700' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                              }`}
+                            >
+                              <span className="w-2.5 h-2.5 rounded-sm border border-slate-300" style={{ background: c }} />
+                              {label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="flex justify-between text-[11px] font-bold text-slate-600 mb-1">
                           <span>Tinggi Minimal Baris</span>
                           <span className="font-mono">{selectedBlock.style.rowHeight || 28}px</span>
                         </div>
@@ -3539,6 +3279,56 @@ const SuratAdministrasiView: React.FC<SuratAdministrasiViewProps> = ({ userRole,
                         onChange={(e) => updateSelectedStyle({ height: Number(e.target.value) })}
                         className="w-full accent-orange-600"
                       />
+                    </div>
+                  )}
+
+                  {selectedBlock.type === 'tanda_tangan' && (
+                    <div>
+                      <div className="flex justify-between text-[11px] font-bold text-slate-600 mb-1">
+                        <span>Ukuran Tanda Tangan</span>
+                        <span className="font-mono">{signatureImgHeight(selectedBlock.style)}pt</span>
+                      </div>
+                      <input
+                        type="range"
+                        min={24}
+                        max={160}
+                        value={signatureImgHeight(selectedBlock.style)}
+                        onChange={(e) => updateSelectedStyle({ signatureHeight: Number(e.target.value) })}
+                        className="w-full accent-orange-600"
+                      />
+                      <div className="flex gap-1 mt-1.5">
+                        {([['Kecil', 40], ['Sedang', 56], ['Besar', 80], ['Sangat Besar', 110]] as const).map(([label, h]) => (
+                          <button
+                            key={label}
+                            type="button"
+                            onClick={() => updateSelectedStyle({ signatureHeight: h })}
+                            className={`flex-1 px-1 py-1 rounded-lg text-[10px] font-bold transition-colors ${
+                              signatureImgHeight(selectedBlock.style) === h ? 'bg-orange-100 text-orange-700' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                            }`}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                      <p className="text-[10px] text-slate-400 mt-1">Bisa juga tarik kotak oranye di sudut gambar tanda tangan pada kanvas.</p>
+                    </div>
+                  )}
+
+                  {selectedBlock.type === 'gambar' && (
+                    <div className="grid grid-cols-3 gap-2">
+                      {([['x', 'X (kiri)'], ['y', 'Y (atas)'], ['width', 'Lebar']] as const).map(([k, label]) => (
+                        <label key={k} className="block text-[11px] font-bold text-slate-600">
+                          {label} (pt)
+                          <input
+                            type="number"
+                            step={1}
+                            min={k === 'width' ? 16 : 0}
+                            value={selectedBlock.style[k] ?? (k === 'width' ? 100 : 0)}
+                            onChange={(e) => updateSelectedStyle({ [k]: Number(e.target.value) })}
+                            className="mt-1 w-full px-2 py-1 border border-slate-200 rounded-lg text-xs font-mono"
+                          />
+                        </label>
+                      ))}
                     </div>
                   )}
 
@@ -3964,7 +3754,6 @@ const SuratAdministrasiView: React.FC<SuratAdministrasiViewProps> = ({ userRole,
                                 type="button"
                                 onClick={() => {
                                   updateSelectedData({ signatureUrl: '' });
-                                  onShowAlert('Tanda Tangan Dihapus', 'Gambar tanda tangan telah dihapus.', 'success');
                                 }}
                                 className="px-2.5 py-1.5 bg-red-50 hover:bg-red-100 text-red-600 rounded-lg text-xs font-bold transition-colors cursor-pointer"
                               >
@@ -4249,13 +4038,8 @@ const SuratAdministrasiView: React.FC<SuratAdministrasiViewProps> = ({ userRole,
 
                       {/* Clean Paper Sheet */}
                       <div
-                        style={{
-                          transform: `scale(${fullscreenZoom / 100})`,
-                          transformOrigin: 'top center',
-                          width: paperOrientation === 'landscape' ? '842px' : '595px',
-                          minHeight: paperOrientation === 'landscape' ? '595px' : '842px'
-                        }}
-                        className="bg-white rounded-sm shadow-2xl p-10 relative text-slate-900 border border-slate-300/40 pointer-events-auto"
+                        style={paperStyle(fullscreenZoom)}
+                        className="bg-white rounded-sm shadow-2xl relative text-slate-900 outline outline-1 outline-slate-300/40 pointer-events-auto"
                       >
                         {/* Render document blocks cleanly */}
                         {pageBlocks.length === 0 ? (
@@ -4263,7 +4047,14 @@ const SuratAdministrasiView: React.FC<SuratAdministrasiViewProps> = ({ userRole,
                             Halaman {pageNum} kosong.
                           </div>
                         ) : (
-                          pageBlocks.map((block) => renderFullscreenBlock(block))
+                          <div className="flex flex-col">
+                            {pageBlocks.filter(b => b.type === 'gambar').map(b => renderFloatingImage(b, false, pageNum))}
+                            {pageBlocks.filter(b => b.type !== 'gambar').map((block) => (
+                              <div key={block.id} inert style={blockMargins(block)}>
+                                {renderBlockContent(block, false, false)}
+                              </div>
+                            ))}
+                          </div>
                         )}
                       </div>
                     </div>

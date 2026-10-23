@@ -22,6 +22,7 @@ import MemberManagementView from './views/MemberManagementView';
 import ContentManagementView from './views/ContentManagementView';
 import StreamingView from './views/StreamingView';
 import LecturerStudentsView from './views/LecturerStudentsView';
+import ScoresView from './views/ScoresView';
 import LecturerSupervisionsView from './views/LecturerSupervisionsView';
 import LecturerWorkloadsView from './views/LecturerWorkloadsView';
 import LecturerStartupsView from './views/LecturerStartupsView';
@@ -33,6 +34,7 @@ const App: React.FC = () => {
   const [isRestoringSession, setIsRestoringSession] = useState(true);
   const [sessionError, setSessionError] = useState(false);
   const [activeTab, setActiveTab] = useState('dashboard');
+  const [focusMode, setFocusMode] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [startups, setStartups] = useState<StartupTeam[]>([]);
   const [profile, setProfile] = useState<UserProfile>({ id: '0000', name: 'GUEST', email: '', role: UserRole.STUDENT, avatar: 'https://i.pravatar.cc/150', isApproved: true, isActive: true });
@@ -240,7 +242,7 @@ const App: React.FC = () => {
   );
 
   return (
-    <Layout activeTab={activeTab} setActiveTab={setActiveTab} userName={profile.name} userRole={profile.role} logo={assets.logoUrl} onLogout={handleLogout} isAdmin={isAdmin}>
+    <Layout activeTab={activeTab} setActiveTab={setActiveTab} userName={profile.name} userRole={profile.role} logo={assets.logoUrl} onLogout={handleLogout} isAdmin={isAdmin} focusMode={focusMode} fullWidth={activeTab === 'surat-administrasi'}>
       {isLoading ? <div className="py-40 flex flex-col items-center"><div className="w-12 h-12 border-4 border-orange-600 border-t-transparent rounded-full animate-spin mb-6"></div><p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Syncing...</p></div> : (
         <>
           {activeTab === 'dashboard' && (
@@ -260,9 +262,10 @@ const App: React.FC = () => {
             />
           )}
           {activeTab === 'student-status' && profile.role === UserRole.STUDENT && <StudentStatusView state={studentStatus} />}
+          {activeTab === 'scores' && <ScoresView role={profile.role} />}
           {activeTab === 'profile' && <ProfileView profile={profile} setProfile={setProfile} startups={startups} handleProfileUpdate={async e => { e.preventDefault(); setIsLoading(true); const { startupPosition, startupId, studentType, ...editableProfile } = profile; const result = await api.postData('updateProfile', editableProfile); setIsLoading(false); if (result?.status === 'success') { setProfile(await api.restoreSession()); showAlert('Profile Synced', 'Changes committed.', 'success'); } else showAlert('Gagal menyimpan', result?.message || 'Profil belum tersimpan.', 'error'); }} onFileUpload={handleFileUpload} />}
           {activeTab === 'mitra' && <MitraView userRole={profile.role} onShowAlert={showAlert} showConfirm={showConfirm} />}
-          {activeTab === 'surat-administrasi' && profile.role !== UserRole.STUDENT && <SuratAdministrasiView userRole={profile.role} onShowAlert={showAlert} startups={startups} showConfirm={showConfirm} />}
+          {activeTab === 'surat-administrasi' && profile.role !== UserRole.STUDENT && <SuratAdministrasiView userRole={profile.role} onShowAlert={showAlert} startups={startups} showConfirm={showConfirm} onFocusModeChange={setFocusMode} />}
           {activeTab === 'repo' && <RepoView profile={profile} onShowAlert={showAlert} isAdmin={isAdmin} assets={assets} showConfirm={showConfirm} />}
           {activeTab === 'streaming' && <StreamingView profile={profile} assets={assets} setProfile={setProfile} onShowAlert={showAlert} onRefresh={loadBaseData} showConfirm={showConfirm} />}
           {activeTab === 'informasi' && <InformasiView list={informasiList} isAdmin={isAdmin} currentUser={profile.name} userRole={profile.role} userStartupId={profile.startupId} startups={startups} onRefresh={loadBaseData} onShowAlert={showAlert} showConfirm={showConfirm} />}

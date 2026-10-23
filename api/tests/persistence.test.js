@@ -316,13 +316,15 @@ test('member administration persists identity, password, quota and deletion', as
   await bridge('manageStartup', { type: 'add', id: 'startup', data: { name: 'Member Startup' } });
   for (const role of ['STUDENT', 'LECTURER']) {
     const targetId = role === 'STUDENT' ? 'test-student' : 'test-lecturer';
-    await bridge('manageMember', { type: 'updateIdentity', targetId, role, data: { name: 'Edited', password, studentType: 'STARTUP', startupId: 'startup', studentJobDesk: 'PIC Lab', lecturerCode: 'CODE' } });
+    await bridge('manageMember', { type: 'updateIdentity', targetId, role, data: { name: 'Edited', email: 'edited@kolab.test', isApproved: true, isActive: true, password, studentType: 'STARTUP', startupId: 'startup', studentJobDesk: 'PIC Lab', studentStatuses: ['Aslab'], youtube: 'yt-link', spotify: 'sp-link', lecturerCode: 'CODE' } });
     await request('/auth/login', { id: targetId, role, password }, null);
     await bridge('updateMemberStorage', { targetId, role, customQuota: 1000000, customMaxUpload: 500000 });
     const members = await bridge(role === 'STUDENT' ? 'getStudents' : 'getLecturers');
     const member = members.find(m => m.studentId === targetId);
     assert.equal(member.customQuota, 1000000);
     assert.equal(member.name, 'Edited');
+    assert.equal(member.email, 'edited@kolab.test');
+    if (role === 'STUDENT') assert.deepEqual([member.studentStatuses, member.youtube, member.spotify], [['Aslab'], 'yt-link', 'sp-link']);
   }
   await bridge('manageStartup', { type: 'delete', id: 'startup' });
   await request('/auth/register', { id: 'delete-me', role: 'STUDENT', name: 'Delete', password }, null);
@@ -747,4 +749,20 @@ test('lecturer portal is read-only, scoped to lecturer and excludes sensitive st
   assert.equal(workloads.asMember.length, 0);
   await request('/lecturer/students', undefined, token, 403);
   await bridge('manageMember', { type: 'updateIdentity', targetId: nim, role: 'STUDENT', data: { name: 'Must fail' } }, lecturerToken, 403);
+});
+
+test('admin mengganti NIM: semua rujukan ikut pindah, NIM ganda ditolak', async () => {
+  await request('/auth/register', { id: 'nim-lama', role: 'STUDENT', name: 'Ganti NIM', password }, null);
+  await request('/auth/register', { id: 'nim-lain', role: 'STUDENT', name: 'Pemilik NIM', password }, null);
+  await db.execute("INSERT INTO internships (id,student_nim,startup_id,start_date,end_date,status) VALUES ('rename-int','nim-lama','x','2026-07-07','2026-12-31','ONGOING')");
+  await db.execute("INSERT INTO workload_members (id,workload_id,member_id,member_role) VALUES ('rename-wm','w','nim-lama','STUDENT')");
+  const rename = (newNim, expected = 200) => bridge('manageMember', { type: 'updateIdentity', targetId: 'nim-lama', role: 'STUDENT', data: { name: 'Ganti NIM', newNim } }, token, expected);
+
+  await rename('nim-lain', 409);
+  await rename('x', 400);
+  assert.equal((await rename('nim-baru')).memberId, 'nim-baru');
+  assert.equal((await bridge('getStudents')).some(m => m.studentId === 'nim-lama'), false);
+  assert.equal((await db.execute("SELECT student_nim FROM internships WHERE id='rename-int'"))[0][0].student_nim, 'nim-baru');
+  assert.equal((await db.execute("SELECT member_id FROM workload_members WHERE id='rename-wm'"))[0][0].member_id, 'nim-baru');
+  await request('/auth/login', { id: 'nim-baru', role: 'STUDENT', password }, null);
 });

@@ -465,7 +465,10 @@ const MemberManagementView: React.FC<MemberManagementViewProps> = ({ userRole, s
     const isS = editingIdentity.role === UserRole.STUDENT;
     const data: any = {
       name: fd.get('name'),
-      password: fd.get('password') || undefined, 
+      email: String(fd.get('email') || '').trim(),
+      isApproved: fd.get('isApproved') === 'on',
+      isActive: fd.get('isActive') === 'on',
+      password: fd.get('password') || undefined,
     };
 
     if (isS) {
@@ -473,6 +476,11 @@ const MemberManagementView: React.FC<MemberManagementViewProps> = ({ userRole, s
       data.startupId = editingIdentity.studentType === 'STARTUP' ? editingIdentity.startupId : null;
       data.startupPosition = editingIdentity.studentType === 'STARTUP' ? editingIdentity.startupPosition : null;
       data.studentJobDesk = fd.get('studentJobDesk');
+      data.studentStatuses = fd.getAll('studentStatuses');
+      const newNim = String(fd.get('newNim') || '').trim();
+      if (newNim && newNim !== editingIdentity.studentId) data.newNim = newNim;
+      data.youtube = String(fd.get('youtube') || '').trim();
+      data.spotify = String(fd.get('spotify') || '').trim();
     } else {
       data.lecturerCode = fd.get('lecturerCode');
     }
@@ -484,10 +492,16 @@ const MemberManagementView: React.FC<MemberManagementViewProps> = ({ userRole, s
       data
     });
 
-    if(res?.status === 'success') {
+    if (res?.status === 'success' && data.newNim && res.memberId !== data.newNim) {
+      // Server lama (belum di-restart) mengabaikan newNim tapi tetap membalas sukses
+      onShowAlert('NIM belum berubah', 'Data lain tersimpan, tetapi server API belum mendukung ganti NIM. Restart backend portal lalu ulangi.', 'error');
+      fetchMembers();
+    } else if(res?.status === 'success') {
       onShowAlert('Identity Synchronized', 'Identitas user telah diperbarui.', 'success');
       setEditingIdentity(null);
       fetchMembers();
+    } else {
+      onShowAlert('Gagal menyimpan', res?.message || 'Detail user belum tersimpan.', 'error');
     }
   };
 
@@ -861,7 +875,22 @@ const MemberManagementView: React.FC<MemberManagementViewProps> = ({ userRole, s
                       <label className="text-[10px] font-black text-slate-400 uppercase mb-3 block px-2">Authorized Full Name</label>
                       <input name="name" defaultValue={editingIdentity.name} required className="w-full px-7 py-5 bg-slate-50 rounded-[1.8rem] font-bold outline-none focus:ring-4 focus:ring-orange-100/50 transition-all" />
                    </div>
-                   
+                   <div className="space-y-3">
+                      <label className="text-[10px] font-black text-slate-400 uppercase px-2">{editingIdentity.role === UserRole.STUDENT ? 'NIM' : 'NIP'}</label>
+                      {editingIdentity.role === UserRole.STUDENT ? <>
+                        <input name="newNim" defaultValue={editingIdentity.studentId} required pattern="[A-Za-z0-9._\-]{3,20}" title="3–20 karakter: huruf, angka, titik, strip, garis bawah" className="w-full px-6 py-4 bg-slate-50 rounded-2xl font-bold outline-none focus:ring-4 focus:ring-orange-100/50" />
+                        <p className="text-[10px] font-bold text-slate-400 px-2">Samakan dengan NIM di aplikasi Presensi & Social Credit. NIM juga ID login: mahasiswa harus login ulang dengan NIM baru.</p>
+                      </> : <input value={editingIdentity.studentId} readOnly title="NIP tidak dapat diubah" className="w-full px-6 py-4 bg-slate-100 text-slate-400 rounded-2xl font-bold outline-none cursor-not-allowed" />}
+                   </div>
+                   <div className="space-y-3">
+                      <label className="text-[10px] font-black text-slate-400 uppercase px-2">Email</label>
+                      <input name="email" type="email" defaultValue={editingIdentity.email || ''} placeholder="nama@email.com" className="w-full px-6 py-4 bg-slate-50 rounded-2xl font-bold outline-none focus:ring-4 focus:ring-orange-100/50" />
+                   </div>
+                   <div className="md:col-span-2 flex flex-wrap gap-3">
+                      <label className="flex items-center gap-2 px-5 py-3 bg-slate-50 rounded-2xl text-xs font-black uppercase tracking-widest text-slate-600 cursor-pointer"><input type="checkbox" name="isApproved" defaultChecked={editingIdentity.isApproved} className="w-4 h-4 accent-slate-900" /> Approved</label>
+                      <label className="flex items-center gap-2 px-5 py-3 bg-slate-50 rounded-2xl text-xs font-black uppercase tracking-widest text-slate-600 cursor-pointer"><input type="checkbox" name="isActive" defaultChecked={editingIdentity.isActive} className="w-4 h-4 accent-slate-900" /> Akun Aktif</label>
+                   </div>
+
                    {editingIdentity.role === UserRole.STUDENT ? (
                      <>
                         <div className="space-y-3">
@@ -882,6 +911,22 @@ const MemberManagementView: React.FC<MemberManagementViewProps> = ({ userRole, s
                         <div className="md:col-span-2">
                            <label className="text-[10px] font-black text-slate-400 uppercase mb-3 block px-2">Official JobDesk Assignment</label>
                            <input name="studentJobDesk" defaultValue={editingIdentity.studentJobDesk || ''} placeholder="Job Desk operasional" className="w-full px-7 py-5 bg-slate-50 rounded-[1.8rem] font-bold outline-none" />
+                        </div>
+                        <div className="md:col-span-2 space-y-3">
+                           <label className="text-[10px] font-black text-slate-400 uppercase px-2">Ecosystem Statuses</label>
+                           <div className="flex flex-wrap gap-3">
+                              {['Startup', 'Aslab', 'Member Biasa'].map(status => (
+                                <label key={status} className="flex items-center gap-2 px-5 py-3 bg-slate-50 rounded-2xl text-xs font-black uppercase tracking-widest text-slate-600 cursor-pointer"><input type="checkbox" name="studentStatuses" value={status} defaultChecked={editingIdentity.studentStatuses?.includes(status)} className="w-4 h-4 accent-slate-900" /> {status}</label>
+                              ))}
+                           </div>
+                        </div>
+                        <div className="space-y-3">
+                           <label className="text-[10px] font-black text-slate-400 uppercase px-2">YouTube</label>
+                           <input name="youtube" defaultValue={editingIdentity.youtube || ''} placeholder="Link channel YouTube" className="w-full px-6 py-4 bg-slate-50 rounded-2xl font-bold outline-none" />
+                        </div>
+                        <div className="space-y-3">
+                           <label className="text-[10px] font-black text-slate-400 uppercase px-2">Spotify</label>
+                           <input name="spotify" defaultValue={editingIdentity.spotify || ''} placeholder="Link Spotify" className="w-full px-6 py-4 bg-slate-50 rounded-2xl font-bold outline-none" />
                         </div>
                      </>
                    ) : (

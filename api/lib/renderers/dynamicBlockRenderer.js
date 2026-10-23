@@ -15,7 +15,26 @@
  */
 
 import PDFDocument from 'pdfkit';
+import { fileURLToPath } from 'url';
+import { existsSync } from 'fs';
+import path from 'path';
 import { resolveImageBuffer } from './signatureHelper.js';
+
+const asset = (p) => fileURLToPath(new URL(`../../assets/${p}`, import.meta.url));
+
+// Template sertifikat (desain "Sertifikat Aslab"): latar ornamen + logo, font Poppins, isi rata kiri x=177pt.
+// Editor memakai latar & margin yang sama (public/sertifikat-bg.png, CERT_* di SuratAdministrasiView).
+export const CERTIFICATE_TYPE = 'surat-sertifikat';
+const CERT_MARGINS = { top: 40, bottom: 30, left: 177, right: 60 };
+
+// Gambar bawaan portal ("/logo-fit.png" = public/ di frontend) dibaca dari api/assets; selain itu data URL / URL
+async function resolveImage(url) {
+  if (typeof url === 'string' && url.startsWith('/')) {
+    const file = asset(path.basename(url));
+    return existsSync(file) ? file : null;
+  }
+  return resolveImageBuffer(url);
+}
 
 /**
  * Calculates column widths in points based on headers and custom percentage widths
@@ -39,6 +58,62 @@ function calculateColumnWidths(headers, colWidths, totalWidth) {
   return normalized;
 }
 
+// Lebar tab = 24 spasi, sama dengan `tab-size: 24` di editor (SuratAdministrasiView)
+export const TAB_SPACES = 24;
+// Lebar blok tanda tangan; editor memakai lebar yang sama (SIGNATURE_BLOCK_WIDTH di SuratAdministrasiView)
+export const SIGNATURE_BLOCK_WIDTH = 240;
+
+/**
+ * Teks paragraf dengan dukungan tab ("Nama\t: isi").
+ * Font standar PDF tidak punya glyph tab (tercetak sebagai tanda kutip), jadi tab
+ * di-emulasikan sebagai tab stop: segmen berikutnya mulai di kelipatan TAB_SPACES spasi.
+ */
+export function renderTabbedText(doc, text, x, width, opts) {
+  const stop = doc.widthOfString(' ') * TAB_SPACES;
+  let plain = [];
+  const flush = () => {
+    if (!plain.length) return;
+    // PDFKit membuang baris kosong di akhir teks; spasi kosong itu ditambahkan manual
+    const t = plain.join('\n').replace(/\n+$/, '');
+    const trailing = plain.length - (t ? t.split('\n').length : 0);
+    // **teks** = tebal (opts.font / opts.boldFont)
+    const runs = t.split(/\*\*([\s\S]+?)\*\*/).map((s, i) => [s, i % 2 === 1]).filter(([s]) => s);
+    if (runs.length > 1 || runs[0]?.[1]) {
+      const regular = opts.font || 'Helvetica';
+      runs.forEach(([s, bold], i) => {
+        doc.font(bold ? (opts.boldFont || 'Helvetica-Bold') : regular);
+        const more = { width, ...opts, continued: i < runs.length - 1 };
+        i ? doc.text(s, more) : doc.text(s, x, doc.y, more);
+      });
+      doc.font(regular);
+    } else if (t) doc.text(t, x, doc.y, { width, ...opts });
+    if (trailing) doc.y += trailing * (doc.currentLineHeight(true) + (opts.lineGap || 0));
+    plain = [];
+  };
+
+  for (const line of String(text).split('\n')) {
+    if (!line.includes('\t')) { plain.push(line); continue; }
+    flush();
+    const segs = line.split('\t');
+    const y = doc.y;
+    let cx = 0;
+    segs.forEach((seg, i) => {
+      const last = i === segs.length - 1;
+      if (!last) {
+        if (seg) doc.text(seg, x + cx, y, { lineBreak: false });
+        // Seperti CSS: jika jarak ke tab stop < 0.5ch, lompat ke tab stop berikutnya
+        const end = cx + doc.widthOfString(seg);
+        cx = (Math.floor(end / stop) + 1) * stop;
+        if (cx - end < doc.widthOfString('0') / 2) cx += stop;
+      } else {
+        // Segmen terakhir boleh terbungkus; baris lanjutannya menjorok sejajar isi
+        doc.text(seg || ' ', x + cx, y, { ...opts, width: Math.max(stop, width - cx), align: opts.align === 'justify' ? 'justify' : 'left' });
+      }
+    });
+  }
+  flush();
+}
+
 /**
  * Renders an array of DocumentBlock objects to a PDF buffer
  *
@@ -53,7 +128,8 @@ export async function renderDynamicBlocksToPdf(blocks, options = {}) {
   return new Promise(async (resolve, reject) => {
     try {
       const chunks = [];
-      const margins = orientation === 'landscape'
+      const isCert = options.letterType === CERTIFICATE_TYPE;
+      const margins = isCert ? CERT_MARGINS : orientation === 'landscape'
         ? { top: 40, bottom: 40, left: 50, right: 50 }
         : { top: 50, bottom: 50, left: 60, right: 50 };
 
@@ -66,12 +142,20 @@ export async function renderDynamicBlocksToPdf(blocks, options = {}) {
           Author: 'Research Alliance Ko+Lab Telkom University',
           Creator: 'Portal Ko+Lab Document Engine',
         },
-        autoFirstPage: true
+        autoFirstPage: true,
+        // Sertifikat: font awal Poppins (bukan Helvetica) agar nama 'Helvetica' di bawah tidak tertahan cache
+        font: isCert ? asset('fonts/Poppins-Regular.ttf') : undefined
       });
 
       doc.on('data', (chunk) => chunks.push(chunk));
       doc.on('end', () => resolve(Buffer.concat(chunks)));
       doc.on('error', reject);
+
+      // Sertifikat: nama font standar dipetakan ke Poppins, jadi kode blok di bawah tetap sama
+      if (isCert) {
+        for (const name of ['Helvetica', 'Helvetica-Oblique']) doc.registerFont(name, asset('fonts/Poppins-Regular.ttf'));
+        for (const name of ['Helvetica-Bold', 'Helvetica-BoldOblique']) doc.registerFont(name, asset('fonts/Poppins-Bold.ttf'));
+      }
 
       const usableWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
       const leftMargin = doc.page.margins.left;
@@ -101,16 +185,28 @@ export async function renderDynamicBlocksToPdf(blocks, options = {}) {
           });
         }
 
+        if (isCert) doc.image(asset('sertifikat-bg.png'), 0, 0, { width: doc.page.width, height: doc.page.height });
+
         const pageBlocks = blocksByPage.get(pageNum) || [];
 
+        // Logo/gambar posisi bebas: x/y/lebar (pt) dari pojok kiri atas halaman, tinggi mengikuti rasio
+        for (const b of pageBlocks.filter(b => b.type === 'gambar')) {
+          const img = await resolveImage(b.data?.imageUrl);
+          const s = b.style || {};
+          const y = doc.y;
+          if (img) try { doc.image(img, s.x || 0, s.y || 0, { width: s.width || 100 }); } catch (_) {}
+          doc.y = y;
+        }
+
         for (const block of pageBlocks) {
+          if (block.type === 'gambar') continue;
           const style = block.style || {};
           const data = block.data || {};
 
-          // Margin Top
-          if (style.marginTop && style.marginTop > 0) {
-            doc.moveDown(style.marginTop / 18);
-          }
+          // Margin (px editor = pt PDF, kanvas editor selebar 595px = A4)
+          if (style.marginTop > 0) doc.y += style.marginTop;
+          // Tanpa marginBottom: n × tinggi baris font terakhir (editor menghitung sama: defaultSpaceAfter)
+          const spaceAfter = (fallbackLines) => typeof style.marginBottom === 'number' && style.marginBottom >= 0 ? (doc.y += style.marginBottom) : doc.moveDown(fallbackLines);
 
           // ─── 1. KOP SURAT ────────────────────────────────────────────────
           if (block.type === 'kop_surat') {
@@ -165,7 +261,7 @@ export async function renderDynamicBlocksToPdf(blocks, options = {}) {
             const lineY = doc.y;
             doc.moveTo(leftMargin, lineY).lineTo(rightMargin, lineY).strokeColor('#0f172a').lineWidth(1).stroke();
             doc.moveTo(leftMargin, lineY + 2).lineTo(rightMargin, lineY + 2).strokeColor('#0f172a').lineWidth(2).stroke();
-            doc.moveDown(style.marginBottom ? style.marginBottom / 16 : 0.8);
+            spaceAfter(0.8);
           }
 
           // ─── 2. JUDUL SURAT ──────────────────────────────────────────────
@@ -202,7 +298,7 @@ export async function renderDynamicBlocksToPdf(blocks, options = {}) {
                 });
             }
 
-            doc.moveDown(style.marginBottom ? style.marginBottom / 16 : 0.8);
+            spaceAfter(0.8);
           }
 
           // ─── 3. PARAGRAF TEKS ────────────────────────────────────────────
@@ -217,17 +313,17 @@ export async function renderDynamicBlocksToPdf(blocks, options = {}) {
             else if (isItalic) fontName = 'Helvetica-Oblique';
 
             const align = style.textAlign || 'justify';
-            const lineGap = style.lineHeight ? Math.max(1, (style.lineHeight - 1) * 7) : 3;
+            doc.fontSize(fontSize).font(fontName).fillColor(style.color || '#0f172a');
+            // Samakan dengan line-height CSS editor (default 1.6): jarak baris = lineHeight × ukuran font,
+            // dan baris pertama turun setengah "leading" seperti CSS.
+            const lineBox = (style.lineHeight || 1.6) * fontSize;
+            const lineGap = lineBox - doc.currentLineHeight(true);
+            const halfLeading = (lineBox - (doc._font.ascender - doc._font.descender) / 1000 * fontSize) / 2;
+            doc.y += halfLeading;
+            renderTabbedText(doc, data.text || '', leftMargin, usableWidth, { align, lineGap, font: fontName, boldFont: isItalic ? 'Helvetica-BoldOblique' : 'Helvetica-Bold' });
+            doc.y -= halfLeading;
 
-            doc.fontSize(fontSize).font(fontName)
-              .fillColor(style.color || '#0f172a')
-              .text(data.text || '', leftMargin, doc.y, {
-                width: usableWidth,
-                align,
-                lineGap
-              });
-
-            doc.moveDown(style.marginBottom ? style.marginBottom / 16 : 0.6);
+            spaceAfter(0.6);
           }
 
           // ─── 4. TABEL DATA ───────────────────────────────────────────────
@@ -247,6 +343,8 @@ export async function renderDynamicBlocksToPdf(blocks, options = {}) {
               const paddingY = style.paddingY ?? 6;
               const paddingX = style.paddingX ?? 8;
               const tableFontSize = style.fontSize || 9.5;
+              // Warna garis tabel bisa diatur (style.borderColor), default hitam
+              const tableBorder = style.borderColor || '#000000';
 
               // Table Header Row
               const headerY = doc.y;
@@ -273,7 +371,7 @@ export async function renderDynamicBlocksToPdf(blocks, options = {}) {
                 const w = colWidths[i];
                 // Border rect
                 doc.rect(curX, headerY, w, maxHeaderCellHeight)
-                  .strokeColor('#cbd5e1')
+                  .strokeColor(tableBorder)
                   .lineWidth(0.8)
                   .stroke();
 
@@ -300,7 +398,8 @@ export async function renderDynamicBlocksToPdf(blocks, options = {}) {
                 }
 
                 // Calculate max height for this row
-                let maxRowH = Math.max(style.rowHeight || 20, 20);
+                // Default 28pt = nilai "Standar" di editor
+                let maxRowH = Math.max(style.rowHeight || 28, 20);
                 headers.forEach((_, ci) => {
                   const val = String(row[ci] || '');
                   const w = colWidths[ci] - paddingX * 2;
@@ -325,7 +424,7 @@ export async function renderDynamicBlocksToPdf(blocks, options = {}) {
                   const val = String(row[ci] || '');
 
                   doc.rect(cellX, curRowY, w, maxRowH)
-                    .strokeColor('#e2e8f0')
+                    .strokeColor(tableBorder)
                     .lineWidth(0.6)
                     .stroke();
 
@@ -345,7 +444,7 @@ export async function renderDynamicBlocksToPdf(blocks, options = {}) {
                 doc.y = curRowY + maxRowH;
               });
 
-              doc.moveDown(style.marginBottom ? style.marginBottom / 16 : 0.8);
+              spaceAfter(0.8);
             }
           }
 
@@ -353,110 +452,69 @@ export async function renderDynamicBlocksToPdf(blocks, options = {}) {
           else if (block.type === 'garis_pembatas') {
             const thickness = style.borderThickness || 1;
             const color = style.borderColor || '#cbd5e1';
-            const curY = doc.y + 4;
+            // Blok garis = 4pt + tebal garis + 4pt (sama dengan editor)
+            const curY = doc.y + 4 + thickness / 2;
 
+            // style.width (pt) = panjang garis dari margin kiri; default selebar halaman
             doc.moveTo(leftMargin, curY)
-              .lineTo(rightMargin, curY)
+              .lineTo(style.width > 0 ? Math.min(rightMargin, leftMargin + style.width) : rightMargin, curY)
               .strokeColor(color)
               .lineWidth(thickness)
               .stroke();
+            doc.y += 8 + thickness;
 
-            doc.moveDown(style.marginBottom ? style.marginBottom / 16 : 0.6);
+            spaceAfter(0);
           }
 
           // ─── 6. TANDA TANGAN ─────────────────────────────────────────────
           else if (block.type === 'tanda_tangan') {
-            const textAlign = style.textAlign || 'right';
-            const blockWidth = 240;
-            const startX = textAlign === 'center'
+            // Blok selebar 240pt diletakkan kiri/tengah/kanan; teks di dalamnya rata kiri
+            // (rata tengah bila blok di tengah) — format baku tanda tangan surat dinas.
+            const blockAlign = style.textAlign || 'right';
+            const align = blockAlign === 'center' ? 'center' : 'left';
+            const blockWidth = Math.min(usableWidth, style.width || SIGNATURE_BLOCK_WIDTH);
+            const startX = blockAlign === 'center'
               ? leftMargin + (usableWidth - blockWidth) / 2
-              : textAlign === 'left'
-                ? leftMargin
-                : rightMargin - blockWidth;
+              : blockAlign === 'left' ? leftMargin : rightMargin - blockWidth;
+            const fs = style.fontSize || 11;
+            // Jarak baris 1.3 × ukuran font = line-height blok tanda tangan di editor
+            const line = (text, font = 'Helvetica', extra = {}) => {
+              doc.fontSize(fs).font(font).fillColor('#0f172a');
+              doc.text(text, startX, doc.y, { width: blockWidth, align, lineGap: 1.3 * fs - doc.currentLineHeight(true), ...extra });
+            };
 
-            // City & Date
-            if (data.cityDate) {
-              doc.fontSize(10).font('Helvetica')
-                .fillColor('#334155')
-                .text(data.cityDate, startX, doc.y, { width: blockWidth, align: textAlign });
-            }
+            if (data.cityDate) line(data.cityDate);
+            if (data.salutation) line(data.salutation);
 
-            // Salutation / Role title
-            if (data.salutation) {
-              doc.fontSize(10).font('Helvetica-Bold')
-                .fillColor('#0f172a')
-                .text(data.salutation, startX, doc.y + 1, { width: blockWidth, align: textAlign });
-            }
-
-            doc.moveDown(0.2);
-
-            // Digital Signature Image
-            let signatureRendered = false;
+            // Ruang tanda tangan selalu sama tinggi, ada gambar atau tidak
+            // Tinggi gambar bisa diatur (style.signatureHeight); lebar maksimal selebar blok, rasio dijaga
+            const sigW = blockWidth, sigH = style.signatureHeight || 56;
+            const sigTop = doc.y + 4;
             if (data.signatureUrl) {
               const sigBuffer = await resolveImageBuffer(data.signatureUrl);
               if (sigBuffer) {
-                try {
-                  const sigW = 110;
-                  const sigH = 46;
-                  const sigX = textAlign === 'center'
-                    ? startX + (blockWidth - sigW) / 2
-                    : textAlign === 'left'
-                      ? startX
-                      : startX + blockWidth - sigW;
-
-                  doc.image(sigBuffer, sigX, doc.y, { fit: [sigW, sigH] });
-                  doc.y += sigH + 4;
-                  signatureRendered = true;
-                } catch (_) {}
+                const sigX = align === 'center' ? startX + (blockWidth - sigW) / 2 : startX;
+                try { doc.image(sigBuffer, sigX, sigTop, { fit: [sigW, sigH], align: align === 'center' ? 'center' : 'left', valign: 'center' }); } catch (_) {}
               }
             }
+            doc.y = sigTop + sigH + 4;
 
-            if (!signatureRendered) {
-              doc.moveDown(2.8); // spacing if no signature image
+            // style.signatureLine: garis selebar blok di bawah nama (gaya sertifikat), bukan garis bawah teks
+            line(data.name || 'Robbi Hendriyanto, S.T., M.T.', 'Helvetica-Bold', { underline: !style.signatureLine });
+            if (style.signatureLine) {
+              doc.moveTo(startX, doc.y).lineTo(startX + blockWidth, doc.y).strokeColor('#231f20').lineWidth(0.75).stroke();
+              doc.y += 2;
             }
+            if (data.nip) line(`NIP. ${data.nip}`);
+            if (data.role) line(data.role);
 
-            // Signer Name (Underlined)
-            const signerName = data.name || 'Robbi Hendriyanto, S.T., M.T.';
-            doc.fontSize(style.fontSize || 10.5).font('Helvetica-Bold')
-              .fillColor('#0f172a')
-              .text(signerName, startX, doc.y, {
-                width: blockWidth,
-                align: textAlign,
-                underline: true
-              });
-
-            // NIP
-            if (data.nip) {
-              doc.fontSize(9).font('Helvetica')
-                .fillColor('#475569')
-                .text(`NIP: ${data.nip}`, startX, doc.y + 1, {
-                  width: blockWidth,
-                  align: textAlign
-                });
-            }
-
-            // Role / Jabatan
-            if (data.role) {
-              doc.fontSize(9).font('Helvetica')
-                .fillColor('#475569')
-                .text(data.role, startX, doc.y + 1, {
-                  width: blockWidth,
-                  align: textAlign
-                });
-            }
-
-            doc.moveDown(style.marginBottom ? style.marginBottom / 16 : 0.8);
+            spaceAfter(0.8);
           }
 
           // ─── 7. SPASI KOSONG ─────────────────────────────────────────────
           else if (block.type === 'spasi_kosong') {
             const h = style.height || 24;
             doc.y += h;
-          }
-
-          // Bottom Margin
-          if (style.marginBottom && style.marginBottom > 0) {
-            doc.moveDown(style.marginBottom / 25);
           }
         }
       }

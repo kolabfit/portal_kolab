@@ -4,7 +4,7 @@ import axios from 'axios';
 import crypto from 'node:crypto';
 import { requireSession } from '../lib/session.js';
 import { record } from '../lib/serializers.js';
-import { saveProfile } from '../lib/profile.js';
+import { saveProfile, renameStudentNim } from '../lib/profile.js';
 import { repositoryActions, repositoryAction } from '../lib/repository.js';
 import { manageInternship } from '../lib/internships.js';
 import { saveArticleRelations } from '../lib/articleRelations.js';
@@ -166,6 +166,7 @@ router.post('/', requireSession, async (req, res) => {
           internshipStartDate: user.internship_start_date || null,
           internshipEndDate: user.internship_end_date || null,
           isApproved: !!user.is_approved, isActive: !!user.is_active,
+          youtube: user.youtube || '', spotify: user.spotify || '', studentStatuses: JSON.parse(user.statuses || '[]'),
           workload: workloadMap.get(user.nim) || { activeLoad: 0, totalHistory: 0, categoryLoad: { PKM: 0, PROJECT: 0, RESEARCH: 0, COMPETITION: 0 } }
         })));
       }
@@ -239,7 +240,9 @@ router.post('/', requireSession, async (req, res) => {
         if (type === 'delete') {
           await db.execute(`DELETE FROM ${table} WHERE ${idField}=?`, [memberId]);
         } else if (type === 'updateIdentity') {
-          await saveProfile(db, payload.role, memberId, data, true, req.user.id);
+          const identity = isStudent && data.newNim !== undefined ? await renameStudentNim(db, memberId, data.newNim) : memberId;
+          await saveProfile(db, payload.role, identity, data, true, req.user.id);
+          return await success({ status: 'success', id, memberId: identity });
         } else {
           return res.status(400).json({ status: 'error', message: 'Operasi member tidak valid.' });
         }

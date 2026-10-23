@@ -5,7 +5,8 @@ export type ElementType =
   | 'tabel_data'
   | 'garis_pembatas'
   | 'tanda_tangan'
-  | 'spasi_kosong';
+  | 'spasi_kosong'
+  | 'gambar'; // logo/gambar posisi bebas (style.x/y/width), tidak ikut alur blok
 
 export interface DocumentBlock {
   id: string;
@@ -29,6 +30,11 @@ export interface DocumentBlock {
     height?: number; // for spasi_kosong
     isDoubleLine?: boolean; // for kop garis
     rowHeight?: number; // for table row height
+    signatureHeight?: number; // tanda_tangan: tinggi gambar tanda tangan (pt), default 56
+    width?: number; // garis_pembatas: panjang garis (pt); tanda_tangan: lebar blok (pt, default 240)
+    x?: number; // gambar: jarak dari kiri halaman (pt)
+    y?: number; // gambar: jarak dari atas halaman (pt)
+    signatureLine?: boolean; // tanda_tangan: garis di bawah nama selebar blok (gaya sertifikat)
   };
 }
 
@@ -136,6 +142,7 @@ export function getDefaultBlocksForType(typeId: string): DocumentBlock[] {
           data: {
             tableTitle: 'Lampiran Mahasiswa Magang Startup',
             headers: ['No', 'NIM', 'Nama Mahasiswa', 'Startup Binaan'],
+            colWidths: [8, 22, 40, 30],
             rows: [
               ['1', '607012400003', 'Fitra Okto Kurniawan', 'Sorgummi Ko+Lab'],
               ['2', '607012400008', 'Afrisya Dwiky Mauliddinka', 'Sorgummi Ko+Lab'],
@@ -208,6 +215,7 @@ export function getDefaultBlocksForType(typeId: string): DocumentBlock[] {
           data: {
             tableTitle: 'Daftar Mahasiswa Penerima Dispensasi',
             headers: ['No', 'NIM', 'Nama Mahasiswa', 'Kelas', 'Program Studi'],
+            colWidths: [8, 20, 32, 15, 25],
             rows: [
               ['1', '607012400003', 'Fitra Okto Kurniawan', 'D3SI-48-01', 'D3 Sistem Informasi'],
               ['2', '607012400008', 'Afrisya Dwiky Mauliddinka', 'D3SI-48-01', 'D3 Sistem Informasi']
@@ -311,6 +319,7 @@ export function getDefaultBlocksForType(typeId: string): DocumentBlock[] {
           data: {
             tableTitle: 'Mata Kuliah Yang Direkognisi',
             headers: ['No', 'Mata Kuliah', 'Penambahan Nilai', 'Keterangan'],
+            colWidths: [8, 37, 25, 30],
             rows: [
               ['1', 'Analisis dan Perancangan Sistem Informasi', '+15', 'Untuk tim lolos pendanaan'],
               ['2', 'Pengembangan Aplikasi Berbasis Web', '+10', 'Untuk tim lolos pendanaan'],
@@ -481,6 +490,7 @@ export function getDefaultBlocksForType(typeId: string): DocumentBlock[] {
           data: {
             tableTitle: 'Pernyataan Integritas SevenS',
             headers: ['No', 'Prinsip', 'Komitmen Kerja'],
+            colWidths: [8, 30, 62],
             rows: [
               ['1', 'Disiplin', 'Hadir tepat waktu dan memenuhi jam kerja magang'],
               ['2', 'Integritas', 'Menjaga kerahasiaan data dan source code startup binaan'],
@@ -511,56 +521,38 @@ export function getDefaultBlocksForType(typeId: string): DocumentBlock[] {
         }
       ];
 
-    case 'surat-sertifikat':
+    case 'surat-sertifikat': {
+      // Desain "Sertifikat Aslab": latar & font Poppins dipasang otomatis untuk tipe ini
+      // (dynamicBlockRenderer.js / SuratAdministrasiView). Jarak antar blok mengikuti PDF contoh.
+      const ink = '#1b1b23';
+      const line = (id: string, title: string, text: string, style: DocumentBlock['style']): DocumentBlock =>
+        ({ id, type: 'paragraf_teks', title, data: { text }, style: { textAlign: 'left', lineHeight: 1.2, color: ink, fontSize: 14, marginBottom: 0, ...style } });
       return [
-        {
-          id: 'judul-sertifikat',
-          type: 'judul_surat',
-          title: 'Judul Sertifikat',
-          data: {
-            title: 'SERTIFIKAT PENGHARGAAN',
-            nomor: 'CERT/KOLAB/2026/001'
-          },
-          style: {
-            fontSize: 20,
-            fontWeight: 'bold',
-            textAlign: 'center',
-            color: '#b45309',
-            marginBottom: 20
-          }
-        },
-        {
-          id: 'paragraf-sertifikat-1',
-          type: 'paragraf_teks',
-          title: 'Teks Sertifikat',
-          data: {
-            text: 'Diberikan dengan bangga kepada:\n\nFitra Okto Kurniawan\nNIM: 607012400003\n\nAtas dedikasi, kontribusi, dan partisipasi aktif sebagai CEO pada tim startup "Sorgummi" dalam Program Inkubasi Research Alliance Ko+Lab Tahun 2026.'
-          },
-          style: {
-            fontSize: 12,
-            textAlign: 'center',
-            lineHeight: 1.8,
-            marginBottom: 30
-          }
-        },
+        // Logo bisa digeser, diubah ukuran, diganti/dihapus; posisi awal = PDF contoh
+        { id: 'sertifikat-logo-fit', type: 'gambar', title: 'Logo FIT Telkom University', data: { imageUrl: '/logo-fit.png' }, style: { x: 654, y: 13.2, width: 125.3 } },
+        { id: 'sertifikat-logo-hub', type: 'gambar', title: 'Logo Ko+Lab Creative HUB', data: { imageUrl: '/logo-kolab-hub.png' }, style: { x: 785, y: 18.5, width: 41.3 } },
+        line('sertifikat-judul', 'Judul', 'SERTIFIKAT', { fontSize: 49, fontWeight: 'bold', lineHeight: 1, marginTop: 79 }),
+        line('sertifikat-subjudul', 'Sub Judul', 'Penghargaan', { fontSize: 31, fontWeight: 'bold', lineHeight: 1, marginTop: 1 }),
+        line('sertifikat-diberikan', 'Pengantar', 'Diberikan kepada:', { fontSize: 17, color: '#025464', marginTop: 14 }),
+        line('sertifikat-nama', 'Nama Penerima', 'MAULANA FEBRIAN NURHASAN', { fontSize: 31, fontWeight: 'bold', color: '#da9e05', marginTop: 6 }),
+        { id: 'sertifikat-garis', type: 'garis_pembatas', title: 'Garis Nama', data: {}, style: { borderThickness: 1, borderColor: '#231f20', width: 490, marginBottom: 6 } },
+        line('sertifikat-atas', 'Keterangan', 'atas kontribusi sebagai', {}),
+        line('sertifikat-peran', 'Peran', 'Asisten Laboratorium Riset', { fontSize: 20, fontWeight: 'bold', color: '#c51012', marginTop: 3 }),
+        line('sertifikat-lembaga', 'Lembaga', 'pada **Research Alliance Ko+lab, Fakultas Ilmu Terapan, Telkom University.**', { marginTop: 4 }),
+        line('sertifikat-tanggal', 'Tempat & Tanggal', 'Bandung, 29 Mei 2026', { marginTop: 22 }),
         {
           id: 'ttd-sertifikat',
           type: 'tanda_tangan',
           title: 'Pengesahan Ketua Ko+Lab',
           data: {
-            cityDate: 'Bandung, 16 Oktober 2026',
-            salutation: 'Ketua Research Alliance Ko+Lab,',
-            name: 'Robbi Hendriyanto, S.T., M.T.',
-            nip: '25850011',
+            name: 'ROBBI HENDRIYANTO, S.T., M.T.',
+            role: 'Ketua Research Alliance Ko+Lab\nTelkom University',
             signatureUrl: ''
           },
-          style: {
-            fontSize: 11,
-            textAlign: 'center',
-            marginBottom: 20
-          }
+          style: { fontSize: 12, textAlign: 'left', width: 317, signatureLine: true, signatureHeight: 92, marginBottom: 0 }
         }
       ];
+    }
 
     case 'surat-pengantar':
       return [
@@ -618,6 +610,7 @@ export function getDefaultBlocksForType(typeId: string): DocumentBlock[] {
           data: {
             tableTitle: 'Daftar Anggota Tim Startup Sorgummi',
             headers: ['No', 'NIM', 'Nama Mahasiswa', 'Posisi / Role'],
+            colWidths: [8, 22, 40, 30],
             rows: [
               ['1', '607012400003', 'Fitra Okto Kurniawan', 'CEO / Hustler'],
               ['2', '607012400008', 'Afrisya Dwiky Mauliddinka', 'CTO / Hacker'],
@@ -676,7 +669,7 @@ export function getDefaultBlocksForType(typeId: string): DocumentBlock[] {
           pageNumber: 1,
           data: {
             title: 'SURAT KETERANGAN RESMI',
-            nomor: 'Nomor: 001/RA-KOLAB/FIT/X/2026'
+            nomor: '001/RA-KOLAB/FIT/X/2026'
           },
           style: {
             fontSize: 13,
