@@ -5,7 +5,7 @@ import type { StartupPosition } from '../types';
 import React, { useEffect, useState } from 'react';
 import { 
   Trash2, Search, Rocket, HardDrive, 
-  Plus, X, Save, ArrowRight, UserPlus, Edit3, Loader2, CheckCircle2, UserCircle, Globe, Instagram, Lock, Unlock, Users, ShieldAlert, Fingerprint, BookOpen, User, Filter, Briefcase, Building2, RefreshCw, Upload, Download, FileSpreadsheet, FileText, ListChecks
+  Plus, X, Save, ArrowRight, UserPlus, Edit3, Loader2, CheckCircle2, UserCircle, Globe, Instagram, Lock, Unlock, Users, ShieldAlert, Fingerprint, BookOpen, User, Filter, Briefcase, Building2, RefreshCw, Upload, Download, FileSpreadsheet, FileText, ListChecks, KeyRound
 } from 'lucide-react';
 import { api } from '../api';
 import { StartupTeam, UserRole, UserProfile, StudentJobDesk } from '../types';
@@ -190,7 +190,7 @@ const MemberManagementView: React.FC<MemberManagementViewProps> = ({ userRole, s
                          m.studentId?.toString().toLowerCase().includes(studentSearch.toLowerCase());
     const matchesInternship = internshipFilter === 'ALL' || (internshipFilter === 'NONE' ? !m.internshipStatus : m.internshipStatus === internshipFilter);
     const startupName = startups.find(s => s.id === m.startupId)?.name || '';
-    const status = `${m.isActive ? 'active' : 'inactive'} ${m.isApproved ? 'approved' : 'unapproved'}`;
+    const status = `${m.isActive ? 'active' : 'inactive'} ${m.isApproved ? 'approved' : 'unapproved'}${m.resetRequestedAt ? ' reset' : ''}`;
     return matchesSearch && matchesInternship &&
       m.name?.toLowerCase().includes(studentColumnFilters.name.toLowerCase()) &&
       String(m.studentId || '').toLowerCase().includes(studentColumnFilters.id.toLowerCase()) &&
@@ -204,7 +204,7 @@ const MemberManagementView: React.FC<MemberManagementViewProps> = ({ userRole, s
   const filteredLecturers = lecturers.filter(m => {
     const matchesSearch = m.name?.toLowerCase().includes(lecturerSearch.toLowerCase()) || 
                          m.studentId?.toString().toLowerCase().includes(lecturerSearch.toLowerCase());
-    const status = `${m.isActive ? 'active' : 'inactive'} ${m.isApproved ? 'approved' : 'unapproved'}`;
+    const status = `${m.isActive ? 'active' : 'inactive'} ${m.isApproved ? 'approved' : 'unapproved'}${m.resetRequestedAt ? ' reset' : ''}`;
     return matchesSearch &&
       m.name?.toLowerCase().includes(lecturerColumnFilters.name.toLowerCase()) &&
       String(m.studentId || '').toLowerCase().includes(lecturerColumnFilters.id.toLowerCase()) &&
@@ -725,6 +725,26 @@ const MemberManagementView: React.FC<MemberManagementViewProps> = ({ userRole, s
                             {isAccountActive ? <CheckCircle2 size={14}/> : <Lock size={14}/>}
                             {m.isActive ? 'Active' : 'Inactive'} • {m.isApproved ? 'Approved' : 'Pending'}
                          </span>
+                         {m.resetRequestedAt && (
+                           <span title={`Diajukan ${new Date(m.resetRequestedAt).toLocaleString('id-ID')}`} className="mt-2 inline-flex flex-wrap items-center gap-1.5 px-3 py-1 rounded-xl text-[9px] font-black uppercase tracking-widest bg-amber-50 text-amber-600 border border-amber-100">
+                             <KeyRound size={12}/> Minta Reset Password
+                             {(['approve', 'reject'] as const).map(decision => (
+                               <button key={decision} type="button"
+                                 onClick={() => showConfirm(
+                                   decision === 'approve' ? 'Setujui Password Baru?' : 'Tolak Permintaan?',
+                                   decision === 'approve'
+                                     ? `Password baru yang diajukan ${m.name} langsung aktif. Pastikan permintaan ini benar dari yang bersangkutan.`
+                                     : `Permintaan reset password ${m.name} dihapus, password lama tetap berlaku.`,
+                                   async () => {
+                                     const res = await api.postData('manageMember', { type: decision === 'approve' ? 'approvePasswordReset' : 'rejectPasswordReset', role: m.role, targetId: m.studentId });
+                                     if (res?.status === 'success') onShowAlert?.('Berhasil', decision === 'approve' ? 'Password baru sudah aktif.' : 'Permintaan ditolak.', 'success');
+                                     fetchMembers();
+                                   })}
+                                 className={`px-2 py-0.5 rounded-lg text-white ${decision === 'approve' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-red-600 hover:bg-red-700'}`}
+                               >{decision === 'approve' ? 'Setujui' : 'Tolak'}</button>
+                             ))}
+                           </span>
+                         )}
                       </td>
                       <td className="px-10 py-6">
                         <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">

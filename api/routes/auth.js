@@ -183,6 +183,36 @@ router.post('/login', async (req, res) => {
   }
 });
 
+// Lupa password: member mengajukan password baru, aktif setelah admin menyetujui di Kelola Member
+// (bridge manageMember type approvePasswordReset). Respons selalu sama supaya NIM/NIP terdaftar tidak
+// bisa ditebak; ikut kuota rate limit login per IP.
+router.post('/forgot-password', async (req, res) => {
+  const clientIp = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket?.remoteAddress || '127.0.0.1';
+  const limitCheck = checkRateLimit(clientIp);
+  if (!limitCheck.allowed) {
+    res.setHeader('Retry-After', String(limitCheck.retryAfter));
+    return res.status(429).json({ status: 'error', message: `Terlalu banyak percobaan. Silakan coba lagi dalam ${limitCheck.retryAfter} detik.` });
+  }
+  const { role } = req.body;
+  const id = typeof req.body.id === 'string' ? req.body.id.trim() : '';
+  if (!['STUDENT', 'LECTURER'].includes(role) || !id || id.length > 20) {
+    return res.status(400).json({ status: 'error', message: 'Role dan NIM/NIP wajib diisi.' });
+  }
+  const password = typeof req.body.password === 'string' ? req.body.password.trim() : '';
+  if (password.length < 6) {
+    return res.status(400).json({ status: 'error', message: 'Password baru minimal 6 karakter.' });
+  }
+  recordFailedLogin(clientIp);
+  try {
+    const isS = role === 'STUDENT';
+    await db.execute(`UPDATE ${isS ? 'students' : 'lecturers'} SET pending_password=?, reset_requested_at=NOW() WHERE ${isS ? 'nim' : 'nip'}=?`, [sha256(password), id]);
+    res.json({ status: 'success', message: 'Jika akun terdaftar, permintaan ganti password sudah dikirim. Password baru aktif setelah disetujui admin.' });
+  } catch (error) {
+    console.error('[Forgot Password Error]', error);
+    res.status(500).json({ status: 'error', message: 'Terjadi kesalahan sistem.' });
+  }
+});
+
 router.post('/register', (req, res, next) => req.headers.authorization ? requireSession(req, res, next) : next(), async (req, res) => {
   const { id, password, name, role, studentType, startupId, studentJobDesk, lecturerCode } = req.body;
   if (!id || !name || !['STUDENT', 'LECTURER'].includes(role)) {

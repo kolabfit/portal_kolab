@@ -37,6 +37,7 @@ export async function saveProfile(db, role, identity, data, administrative = fal
   if (data.password) {
     updates.push('password=?');
     values.push(crypto.createHash('sha256').update(data.password).digest('hex'));
+    if (!admin) updates.push('pending_password=NULL', 'reset_requested_at=NULL'); // permintaan lupa password gugur
   }
   if (updates.length) await db.execute(`UPDATE ${table} SET ${updates.join(',')} WHERE ${key}=?`, [...values, identity]);
 }

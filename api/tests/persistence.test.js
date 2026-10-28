@@ -327,6 +327,25 @@ test('member administration persists identity, password, quota and deletion', as
     if (role === 'STUDENT') assert.deepEqual([member.studentStatuses, member.youtube, member.spotify], [['Aslab'], 'yt-link', 'sp-link']);
   }
   await bridge('manageStartup', { type: 'delete', id: 'startup' });
+
+  // Lupa password: member ajukan password baru (respons sama untuk ID tak dikenal), aktif hanya setelah admin setujui.
+  const forgot = (id, newPassword) => request('/auth/forgot-password', { role: 'STUDENT', id, password: newPassword }, null);
+  const known = await forgot('test-student', password + 'reset');
+  assert.deepEqual(await forgot('tidak-ada', password + 'reset'), known);
+  await request('/auth/forgot-password', { role: 'ADMIN', id: 'root', password: password + 'reset' }, null, 400);
+  await request('/auth/forgot-password', { role: 'STUDENT', id: 'test-student', password: '123' }, null, 400);
+  const resetFlag = async () => (await bridge('getStudents')).find(m => m.studentId === 'test-student').resetRequestedAt;
+  assert.ok(await resetFlag());
+  await request('/auth/login', { id: 'test-student', role: 'STUDENT', password }, null);
+  await request('/auth/login', { id: 'test-student', role: 'STUDENT', password: password + 'reset' }, null, 401);
+  await bridge('manageMember', { type: 'approvePasswordReset', targetId: 'test-student', role: 'STUDENT' });
+  assert.equal(await resetFlag(), null);
+  await request('/auth/login', { id: 'test-student', role: 'STUDENT', password: password + 'reset' }, null);
+  await forgot('test-student', password + 'tolak');
+  await bridge('manageMember', { type: 'rejectPasswordReset', targetId: 'test-student', role: 'STUDENT' });
+  await request('/auth/login', { id: 'test-student', role: 'STUDENT', password: password + 'tolak' }, null, 401);
+  await request('/auth/login', { id: 'test-student', role: 'STUDENT', password: password + 'reset' }, null);
+
   await request('/auth/register', { id: 'delete-me', role: 'STUDENT', name: 'Delete', password }, null);
   await bridge('manageMember', { type: 'delete', targetId: 'delete-me', role: 'STUDENT' });
   assert.equal((await bridge('getStudents')).some(m => m.studentId === 'delete-me'), false);

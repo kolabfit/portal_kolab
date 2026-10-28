@@ -167,6 +167,7 @@ router.post('/', requireSession, async (req, res) => {
           internshipEndDate: user.internship_end_date || null,
           isApproved: !!user.is_approved, isActive: !!user.is_active,
           youtube: user.youtube || '', spotify: user.spotify || '', studentStatuses: JSON.parse(user.statuses || '[]'),
+          resetRequestedAt: user.reset_requested_at || null,
           workload: workloadMap.get(user.nim) || { activeLoad: 0, totalHistory: 0, categoryLoad: { PKM: 0, PROJECT: 0, RESEARCH: 0, COMPETITION: 0 } }
         })));
       }
@@ -209,6 +210,7 @@ router.post('/', requireSession, async (req, res) => {
           lecturerJobDesks: JSON.parse(user.job_desks || '[]'),
           supervisionCount: supervisionMap.get(user.nip) || 0,
           isApproved: !!user.is_approved, isActive: !!user.is_active,
+          resetRequestedAt: user.reset_requested_at || null,
           workload: workloadMap.get(user.nip) || { activeLoad: 0, totalHistory: 0, categoryLoad: { PKM: 0, PROJECT: 0, RESEARCH: 0, COMPETITION: 0 } }
         })));
       }
@@ -243,6 +245,13 @@ router.post('/', requireSession, async (req, res) => {
           const identity = isStudent && data.newNim !== undefined ? await renameStudentNim(db, memberId, data.newNim) : memberId;
           await saveProfile(db, payload.role, identity, data, true, req.user.id);
           return await success({ status: 'success', id, memberId: identity });
+        } else if (type === 'approvePasswordReset' || type === 'rejectPasswordReset') {
+          // Password baru diajukan member sendiri lewat /auth/forgot-password (lihat routes/auth.js)
+          const [result] = await db.execute(
+            `UPDATE ${table} SET ${type === 'approvePasswordReset' ? 'password=pending_password,' : ''} pending_password=NULL, reset_requested_at=NULL WHERE ${idField}=? AND pending_password IS NOT NULL`,
+            [memberId]
+          );
+          if (!result.affectedRows) throw Object.assign(new Error('Tidak ada permintaan reset password untuk member ini.'), { status: 404 });
         } else {
           return res.status(400).json({ status: 'error', message: 'Operasi member tidak valid.' });
         }

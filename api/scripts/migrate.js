@@ -118,6 +118,14 @@ export async function migrate() {
     await db.query("ALTER TABLE article_attachments ADD COLUMN cdn_asset_id VARCHAR(50) NULL");
     await db.query("ALTER TABLE article_attachments ADD COLUMN storage_provider VARCHAR(30) DEFAULT 'LEGACY'");
   }
+
+  // Lupa password: member mengajukan password baru (hash di pending_password), aktif setelah admin menyetujui
+  for (const table of ['students', 'lecturers']) {
+    const [memberColumns] = await db.query(`SHOW COLUMNS FROM ${table}`);
+    for (const [col, type] of Object.entries({ reset_requested_at: 'DATETIME NULL', pending_password: 'VARCHAR(255) NULL' })) {
+      if (!memberColumns.some(c => c.Field === col)) await db.query(`ALTER TABLE ${table} ADD COLUMN ${col} ${type}`);
+    }
+  }
 }
 
 if (process.argv[1]?.replaceAll('\\', '/').endsWith('/scripts/migrate.js')) {

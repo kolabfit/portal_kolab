@@ -21,6 +21,8 @@ CREATE TABLE IF NOT EXISTS students (
   statuses TEXT, -- JSON string
   youtube TEXT,
   spotify TEXT,
+  reset_requested_at DATETIME NULL, -- lupa password: waktu member mengajukan password baru
+  pending_password VARCHAR(255) NULL, -- lupa password: hash password baru, aktif setelah disetujui admin
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -40,6 +42,8 @@ CREATE TABLE IF NOT EXISTS lecturers (
   custom_max_upload BIGINT DEFAULT 52428800,
   youtube TEXT,
   spotify TEXT,
+  reset_requested_at DATETIME NULL, -- lupa password: waktu member mengajukan password baru
+  pending_password VARCHAR(255) NULL, -- lupa password: hash password baru, aktif setelah disetujui admin
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 

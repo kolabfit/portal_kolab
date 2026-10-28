@@ -120,6 +120,7 @@ export const api = {
       let endpoint = '/bridge';
       if (action === 'login') endpoint = '/auth/login';
       if (action === 'register') endpoint = '/auth/register';
+      if (action === 'forgotPassword') endpoint = '/auth/forgot-password';
 
       const response = await fetch(`${API_BASE_URL}${endpoint}`, {
         method: 'POST',
@@ -140,7 +141,7 @@ export const api = {
     } catch (error) {
       console.error(`POST request failed for [${action}]:`, error);
       const message = error instanceof Error ? error.message : 'Unknown network error';
-      if (!['login', 'register'].includes(action)) window.dispatchEvent(new CustomEvent('portal-api-error', { detail: message }));
+      if (!['login', 'register', 'forgotPassword'].includes(action)) window.dispatchEvent(new CustomEvent('portal-api-error', { detail: message }));
       return { status: 'error', message };
     }
   },

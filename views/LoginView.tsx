@@ -1,6 +1,7 @@
 ﻿import React, { useState } from 'react';
 import { UserRole, AppAssets } from '../types';
 import { Shield, ArrowRight, User, BookOpen, Lock, Terminal, UserPlus, Fingerprint, Loader2 } from 'lucide-react';
+import { api } from '../api';
 
 interface LoginViewProps {
   onLogin: (role: UserRole, id: string, pass: string) => void;
@@ -18,16 +19,32 @@ const LoginView: React.FC<LoginViewProps> = ({ onLogin, onAdminLogin, onRegister
   const [password, setPassword] = useState('');
   const [lecturerCode, setLecturerCode] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isForgotMode, setIsForgotMode] = useState(false);
+  const [resetMessage, setResetMessage] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+
+  const toggleForgotMode = () => {
+    setIsForgotMode(!isForgotMode);
+    setResetMessage('');
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
-    
+
     // Simulate slight delay for the micro-animation to be visible
     await new Promise(r => setTimeout(r, 400));
-    
+
     try {
-      if (isRegisterMode) {
+      if (isForgotMode) {
+        if (password !== confirmPassword) {
+          setResetMessage('Konfirmasi kata sandi tidak cocok.');
+          return;
+        }
+        const res = await api.postData('forgotPassword', { role, id, password });
+        setResetMessage(res?.message || 'Permintaan gagal dikirim.');
+        if (res?.status === 'success') { setPassword(''); setConfirmPassword(''); }
+      } else if (isRegisterMode) {
         await onRegister?.({ role, id, name, password, lecturerCode });
       } else if (isAdminMode) {
         await onAdminLogin(id, password);
@@ -85,10 +102,10 @@ const LoginView: React.FC<LoginViewProps> = ({ onLogin, onAdminLogin, onRegister
         <div className="max-w-md w-full mx-auto my-auto animate-in fade-in slide-in-from-right-8 duration-1000 delay-200">
           <div className="mb-12">
             <h2 className="text-4xl font-black text-slate-900 tracking-tighter mb-3">
-              {isAdminMode ? 'Authorize Root' : isRegisterMode ? 'Request Access' : 'Welcome Back'}
+              {isAdminMode ? 'Authorize Root' : isForgotMode ? 'Lupa Password' : isRegisterMode ? 'Request Access' : 'Welcome Back'}
             </h2>
             <p className="text-slate-400 font-bold text-sm uppercase tracking-widest">
-              {isAdminMode ? 'Elevated privileges required to proceed.' : isRegisterMode ? 'Create your official identity record.' : 'Identify yourself to enter the hub.'}
+              {isAdminMode ? 'Elevated privileges required to proceed.' : isForgotMode ? 'Buat password baru, aktif setelah disetujui admin.' : isRegisterMode ? 'Create your official identity record.' : 'Identify yourself to enter the hub.'}
             </p>
           </div>
 
@@ -172,7 +189,7 @@ const LoginView: React.FC<LoginViewProps> = ({ onLogin, onAdminLogin, onRegister
 
               <div className="group">
                 <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-2">
-                  {isAdminMode ? 'Kata Sandi Admin' : 'Kata Sandi'}
+                  {isAdminMode ? 'Kata Sandi Admin' : isForgotMode ? 'Kata Sandi Baru' : 'Kata Sandi'}
                 </label>
                 <div className="relative">
                    <div className={`absolute inset-y-0 left-6 flex items-center text-slate-300 transition-colors ${isAdminMode ? 'group-focus-within:text-red-600' : 'group-focus-within:text-orange-600'}`}>
@@ -184,10 +201,33 @@ const LoginView: React.FC<LoginViewProps> = ({ onLogin, onAdminLogin, onRegister
                      value={password}
                      onChange={(e) => setPassword(e.target.value)}
                      className={`w-full pl-14 pr-8 py-5 bg-slate-50 border border-transparent rounded-[1.5rem] focus:bg-white focus:ring-4 outline-none transition-all font-bold text-slate-800 ${isAdminMode ? 'focus:ring-red-100' : 'focus:ring-orange-100'} disabled:opacity-50`} 
-                     placeholder="Masukkan kata sandi Anda"
+                     placeholder={isForgotMode ? 'Minimal 6 karakter' : 'Masukkan kata sandi Anda'}
                    />
                 </div>
               </div>
+
+              {isForgotMode && (
+                <div className="group animate-in slide-in-from-top-2">
+                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-2">Ulangi Kata Sandi Baru</label>
+                  <div className="relative">
+                     <div className="absolute inset-y-0 left-6 flex items-center text-slate-300 group-focus-within:text-orange-600 transition-colors">
+                        <Lock size={20} />
+                     </div>
+                     <input
+                       type="password" required
+                       disabled={isSubmitting}
+                       value={confirmPassword}
+                       onChange={(e) => setConfirmPassword(e.target.value)}
+                       className="w-full pl-14 pr-8 py-5 bg-slate-50 border border-transparent rounded-[1.5rem] focus:bg-white focus:ring-4 focus:ring-orange-100 outline-none transition-all font-bold text-slate-800 disabled:opacity-50"
+                       placeholder="Ulangi kata sandi baru"
+                     />
+                  </div>
+                </div>
+              )}
+
+              {isForgotMode && resetMessage && (
+                <p role="status" className="px-6 py-5 bg-emerald-50 text-emerald-700 rounded-[1.5rem] text-sm font-bold leading-relaxed">{resetMessage}</p>
+              )}
             </div>
 
             <button
@@ -198,11 +238,11 @@ const LoginView: React.FC<LoginViewProps> = ({ onLogin, onAdminLogin, onRegister
               {isSubmitting ? (
                 <>
                    <Loader2 size={20} className="animate-spin" />
-                   {isRegisterMode ? 'Transmitting...' : isAdminMode ? 'Verifying...' : 'Authorizing...'}
+                   {isForgotMode || isRegisterMode ? 'Transmitting...' : isAdminMode ? 'Verifying...' : 'Authorizing...'}
                 </>
               ) : (
                 <>
-                  {isRegisterMode ? 'Transmit Request' : isAdminMode ? 'Verify Authority' : 'Secure Entrance'}
+                  {isForgotMode ? 'Kirim Permintaan Reset' : isRegisterMode ? 'Transmit Request' : isAdminMode ? 'Verify Authority' : 'Secure Entrance'}
                   <ArrowRight size={20} className="group-hover:translate-x-2 transition-transform" />
                 </>
               )}
@@ -211,7 +251,17 @@ const LoginView: React.FC<LoginViewProps> = ({ onLogin, onAdminLogin, onRegister
             </button>
             
             <div className="flex flex-col gap-3 items-center">
-              {!isAdminMode && (
+              {!isAdminMode && !isRegisterMode && (
+                <button
+                  type="button"
+                  disabled={isSubmitting}
+                  onClick={toggleForgotMode}
+                  className="text-[10px] font-black text-slate-400 hover:text-slate-600 uppercase tracking-widest transition-colors disabled:opacity-50"
+                >
+                  {isForgotMode ? 'Kembali ke Login' : 'Lupa Password?'}
+                </button>
+              )}
+              {!isAdminMode && !isForgotMode && (
                 <button
                   type="button"
                   disabled={isSubmitting}
@@ -245,7 +295,7 @@ const LoginView: React.FC<LoginViewProps> = ({ onLogin, onAdminLogin, onRegister
           <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
             Copyright{' '}
             <span 
-              onClick={() => { if(!isSubmitting) { setIsAdminMode(!isAdminMode); setIsRegisterMode(false); } }}
+              onClick={() => { if(!isSubmitting) { setIsAdminMode(!isAdminMode); setIsRegisterMode(false); setIsForgotMode(false); } }}
               className="cursor-pointer text-slate-300 hover:text-orange-600 transition-colors px-1 select-none"
             >
               &copy;
