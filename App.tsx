@@ -27,6 +27,7 @@ import LecturerSupervisionsView from './views/LecturerSupervisionsView';
 import LecturerWorkloadsView from './views/LecturerWorkloadsView';
 import LecturerStartupsView from './views/LecturerStartupsView';
 import MitraView from './views/MitraView';
+import FacilityInventoryView from './views/FacilityInventoryView';
 import SuratAdministrasiView from './views/SuratAdministrasiView';
 
 const App: React.FC = () => {
@@ -274,6 +275,7 @@ const App: React.FC = () => {
           {activeTab === 'article' && <ArticleView articles={articles} categories={categories} tags={tags} isAdmin={isAdmin} currentUser={profile.name} onAction={(t, id, d) => { if(t === 'delete') { showConfirm('Purge Article', 'Hapus artikel dari hub?', () => saveAndRefresh('manageArticle', { type: t, id, data: d })); } else { return saveArticle(t, id, d); } }} onRefresh={refreshArticles} showConfirm={showConfirm} />}
           {activeTab === 'announcements' && <AnnouncementsView announcements={announcements} startups={startups} currentUser={profile.name} isAdmin={isAdmin} userRole={profile.role} userStartupId={profile.startupId} onRefresh={loadBaseData} showConfirm={showConfirm} onShowAlert={showAlert} />}
           {activeTab === 'members' && isAdmin && <MemberManagementView userRole={profile.role} startups={startups} onRefresh={loadBaseData} onShowAlert={showAlert} showConfirm={showConfirm} />}
+          {activeTab === 'facility-inventory' && profile.role === UserRole.ADMIN && <FacilityInventoryView showConfirm={showConfirm} />}
           {activeTab === 'article-taxonomy' && isAdmin && <ContentManagementView onShowAlert={showAlert} />}
           {activeTab === 'settings' && <SettingsView assets={assets} setAssets={setAssets} onAssetUpload={handleFileUpload} onSaveAssets={async () => { if (await saveAndRefresh('updateAssets', { data: assets })) showAlert('Global Engine Synced', 'New assets deployed.', 'success'); }} />}
           {activeTab === 'lecturer-students' && profile.role === UserRole.LECTURER && <LecturerStudentsView students={lecturerStudents} onDetail={async nim => api.getData(`lecturer/students/${nim}`)} />}

@@ -312,6 +312,72 @@ test('registration, login, profile, password and fresh session for each role', a
   assert.equal(profile.youtube, 'admin-youtube');
 });
 
+test('facility inventory is admin-only, starts empty, and records asset changes atomically', async () => {
+  const inventory = async (method = 'GET', path = '', data, expected = 200, bearer = token) => {
+    const response = await fetch(base + '/admin/facility-inventory' + path, {
+      method,
+      headers: { 'Content-Type': 'application/json', ...(bearer ? { Authorization: `Bearer ${bearer}` } : {}) },
+      body: data === undefined ? undefined : JSON.stringify(data)
+    });
+    const result = await response.json();
+    assert.equal(response.status, expected, JSON.stringify(result));
+    return result;
+  };
+
+  assert.deepEqual(await inventory(), { rooms: [], assets: [] });
+  await inventory('GET', '', undefined, 401, null);
+  for (const bearer of [studentToken, lecturerToken]) {
+    assert.ok(bearer);
+    await inventory('GET', '', undefined, 403, bearer);
+    await inventory('POST', '/rooms', { code: 'L1', name: 'Ruang Satu' }, 403, bearer);
+  }
+
+  const firstRoom = await inventory('POST', '/rooms', { code: ' l1 ', name: 'Ruang Satu' }, 201);
+  await inventory('POST', '/rooms', { code: 'L1', name: 'Kode duplikat' }, 409);
+  const secondRoom = await inventory('POST', '/rooms', { code: 'L2', name: 'Ruang Dua' }, 201);
+  await inventory('PUT', `/rooms/${secondRoom.id}`, { code: 'L2', name: 'Ruang Dua', floor: 'Lantai 2' });
+
+  const asset = {
+    code: 'PROJ-01', name: 'Proyektor', category: 'Elektronik', roomId: firstRoom.id,
+    condition: 'GOOD', status: 'AVAILABLE', custodian: 'Admin Ko+Lab'
+  };
+  await inventory('POST', '/assets', { ...asset, roomId: 'missing' }, 400);
+  await inventory('POST', '/assets', { ...asset, condition: 'UNKNOWN' }, 400);
+  assert.deepEqual((await inventory()).assets, []);
+  const { id } = await inventory('POST', '/assets', asset, 201);
+  await inventory('POST', '/assets', asset, 409);
+  await inventory('DELETE', `/rooms/${firstRoom.id}`, undefined, 409);
+
+  const [initial] = (await inventory()).assets;
+  assert.equal(initial.roomId, firstRoom.id);
+  assert.equal(initial.version, 1);
+  const move = {
+    ...asset, version: initial.version, roomId: secondRoom.id,
+    condition: 'MINOR_DAMAGE', status: 'MAINTENANCE'
+  };
+  await inventory('PUT', `/assets/${id}`, move);
+  await inventory('PUT', `/assets/${id}`, { ...asset, version: initial.version }, 409);
+  await inventory('DELETE', `/rooms/${firstRoom.id}`);
+
+  const { rooms, assets } = await inventory();
+  assert.deepEqual(rooms.map(({ code, floor }) => [code, floor]), [['L2', 'Lantai 2']]);
+  assert.deepEqual(assets, [{ ...asset, id, roomId: move.roomId, condition: move.condition, status: move.status, notes: null, version: 2 }]);
+  const history = await inventory('GET', `/assets/${id}/history`);
+  assert.equal(history.length, 2);
+  assert.equal(history[0].previousState.roomCode, 'L1');
+  assert.equal(history[0].currentState.roomId, secondRoom.id);
+  assert.equal(history[0].currentState.condition, 'MINOR_DAMAGE');
+  assert.equal(history[0].currentState.status, 'MAINTENANCE');
+  assert.equal(history[0].changedBy, 'test-admin');
+  assert.ok(Number.isSafeInteger(history[0].changedAt));
+  assert.equal(history[1].previousState, null);
+  assert.equal(history[1].currentState.roomName, 'Ruang Satu');
+
+  const { migrateFacilityInventory } = await import('../lib/facilityInventory.js');
+  await migrateFacilityInventory(db);
+  assert.deepEqual((await inventory()).assets, assets);
+});
+
 test('member administration persists identity, password, quota and deletion', async () => {
   await bridge('manageStartup', { type: 'add', id: 'startup', data: { name: 'Member Startup' } });
   for (const role of ['STUDENT', 'LECTURER']) {
