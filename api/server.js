@@ -26,6 +26,7 @@ import mitraRoutes from './routes/mitra.js';
 import lettersRoutes from './routes/letters.js';
 import { migrate } from './scripts/migrate.js';
 import scoreRoutes from './routes/scores.js';
+import facilityInventoryRoutes from './routes/facilityInventory.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -99,6 +100,7 @@ app.use('/api/assets', assetRoutes);
 app.use('/api/mitra', mitraRoutes);
 app.use('/api/letters', lettersRoutes);
 app.use('/api/scores', scoreRoutes);
+app.use('/api/admin/facility-inventory', facilityInventoryRoutes);
 
 app.get('/', (req, res) => {
   res.send('Portal Kolab API is running');

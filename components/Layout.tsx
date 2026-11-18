@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { 
   LayoutDashboard, UserCircle, Calendar, Flag, Info, Megaphone,
-  Settings, LogOut, Menu, Bell, Users, FolderOpen, Database, X, Clock, FileText, Radio, Tags, Building2, FileStack, Award
+  Settings, LogOut, Menu, Bell, Users, FolderOpen, Database, X, Clock, FileText, Radio, Tags, Building2, FileStack, Award, Package
 } from 'lucide-react';
 import { AppNotification, UserRole } from '../types';
 import { api } from '../api';
@@ -60,6 +60,7 @@ const Layout: React.FC<LayoutProps> = ({ children, activeTab, setActiveTab, user
 
   if (isAdmin && userRole === UserRole.ADMIN) {
     menuItems.push({ id: 'members', label: 'Management User', icon: Users });
+    menuItems.push({ id: 'facility-inventory', label: 'Kelola Aset Sarana', icon: Package });
     menuItems.push({ id: 'article-taxonomy', label: 'Kategori & Tag Artikel', icon: Tags });
     menuItems.push({ id: 'settings', label: 'System', icon: Settings });
   }
@@ -113,6 +114,7 @@ const Layout: React.FC<LayoutProps> = ({ children, activeTab, setActiveTab, user
             {menuItems.map((item) => (
               <button
                 key={item.id}
+                aria-label={item.label}
                 onClick={() => { setActiveTab(item.id); setIsSidebarOpen(false); }}
                 className={`w-full flex items-center gap-4 p-3.5 rounded-2xl text-sm font-bold transition-all relative ${activeTab === item.id ? 'bg-orange-600 text-white shadow-xl shadow-orange-100' : 'text-slate-400 hover:bg-slate-50'}`}
               >

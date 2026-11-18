@@ -81,6 +81,21 @@ export const api = {
       return null;
     }
   },
+  async facilityInventoryRequest<T>(path = '', method = 'GET', body?: unknown): Promise<T> {
+    const token = this.getToken();
+    if (!token) throw new Error('Silakan login kembali.');
+
+    const response = await fetch(`${API_BASE_URL}/admin/facility-inventory${path}`, {
+      method, cache: 'no-store', signal: AbortSignal.timeout(15000),
+      headers: { Authorization: 'Bearer ' + token, ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) },
+      body: body === undefined ? undefined : JSON.stringify(body)
+    });
+    if (!response.ok) {
+      const result = await response.json().catch(() => null);
+      throw new Error(result?.message || 'Permintaan inventaris gagal.');
+    }
+    return response.json();
+  },
   async getScores(signal?: AbortSignal): Promise<InternScoresResponse> {
     const response = await fetch(API_BASE_URL + '/scores', {
       headers: { Authorization: 'Bearer ' + this.getToken() }, cache: 'no-store', signal

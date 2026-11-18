@@ -139,3 +139,9 @@ mahasiswa yang sama, termasuk ketika tanggal selesai sama dengan tanggal mulai
 record lain. `COMPLETED` dan `CANCELLED` tetap dapat dicatat sebagai riwayat.
 
 Laporan perubahan dan hasil pengujian: [IMPLEMENTATION-MAGANG.md](IMPLEMENTATION-MAGANG.md).
+
+## Kelola Aset Sarana (ADMIN)
+
+Gunakan menu **Kelola Aset Sarana** setelah masuk sebagai admin. Instalasi baru memakai `schema.sql`. Untuk database uji yang sudah ada, jalankan `npm --prefix api run db:migrate` dan mulai ulang backend.
+
+Untuk uji coba, buat dua ruang lalu catat satu aset di ruang pertama. Edit aset untuk memindahkannya ke ruang kedua dan ubah kondisinya. Buka **Riwayat** untuk memeriksa kedua perubahan, lalu cari aset dengan filter ruang. Gunakan status **Tidak aktif** untuk aset yang sudah dikeluarkan dari penggunaan agar catatannya tetap tersedia.
