@@ -145,3 +145,9 @@ Laporan perubahan dan hasil pengujian: [IMPLEMENTATION-MAGANG.md](IMPLEMENTATION
 Gunakan menu **Kelola Aset Sarana** setelah masuk sebagai admin. Instalasi baru memakai `schema.sql`. Untuk database uji yang sudah ada, jalankan `npm --prefix api run db:migrate` dan mulai ulang backend.
 
 Untuk uji coba, buat dua ruang lalu catat satu aset di ruang pertama. Edit aset untuk memindahkannya ke ruang kedua dan ubah kondisinya. Buka **Riwayat** untuk memeriksa kedua perubahan, lalu cari aset dengan filter ruang. Gunakan status **Tidak aktif** untuk aset yang sudah dikeluarkan dari penggunaan agar catatannya tetap tersedia.
+
+## Virtual Office 3D
+
+Menu **Virtual Office 3D** tersedia untuk admin, mahasiswa, dan dosen setelah login. Pilih **Denah Gabungan Ko+Lab** untuk denah enam area. Klik salah satu area untuk membuka modelnya, lalu gunakan kontrol putar dan zoom. Jika browser tidak mendukung WebGL, portal menampilkan gambar denah.
+
+Admin dapat membuka **Kelola Virtual Office** untuk mengubah nama dan deskripsi setiap area atau mengatur publikasi denah. Admin juga bisa menambah, memindahkan, mengedit, dan menghapus penanda nama dan jabatan dari bagian **Posisi orang di denah**. Pilih ruang, pilih **Tambah orang**, isi nama dan jabatan, klik lantai pada model 3D, lalu **Simpan pengaturan**. Penanda muncul di tampilan ruang dan daftar orang pada denah yang ditayangkan. Instalasi baru memakai `schema.sql`. Untuk database yang sudah ada, jalankan `npm --prefix api run db:migrate`, lalu mulai ulang backend. Denah ditayangkan secara bawaan.

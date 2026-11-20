@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { 
   LayoutDashboard, UserCircle, Calendar, Flag, Info, Megaphone,
-  Settings, LogOut, Menu, Bell, Users, FolderOpen, Database, X, Clock, FileText, Radio, Tags, Building2, FileStack, Award, Package
+  Settings, LogOut, Menu, Bell, Users, FolderOpen, Database, X, Clock, FileText, Radio, Tags, Building2, FileStack, Award, Package, Box
 } from 'lucide-react';
 import { AppNotification, UserRole } from '../types';
 import { api } from '../api';
@@ -38,6 +38,7 @@ const Layout: React.FC<LayoutProps> = ({ children, activeTab, setActiveTab, user
     { id: 'profile', label: 'Account', icon: UserCircle },
     ...(userRole === UserRole.STUDENT ? [{ id: 'student-status', label: 'Status Saya', icon: UserCircle }] : []),
     { id: 'mitra', label: 'Mitra Ko+Lab', icon: Building2 },
+    { id: 'virtual-office', label: 'Virtual Office 3D', icon: Box },
     ...(userRole !== UserRole.STUDENT ? [{ id: 'surat-administrasi', label: 'Surat Administrasi', icon: FileStack }] : []),
     { id: 'scores', label: 'Nilai Magang', icon: Award },
     { id: 'repo', label: 'Mainframe Repo', icon: FolderOpen },
