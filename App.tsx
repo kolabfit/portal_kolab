@@ -28,6 +28,7 @@ import LecturerWorkloadsView from './views/LecturerWorkloadsView';
 import LecturerStartupsView from './views/LecturerStartupsView';
 import MitraView from './views/MitraView';
 import FacilityInventoryView from './views/FacilityInventoryView';
+import VirtualOfficeView from './views/VirtualOfficeView';
 import SuratAdministrasiView from './views/SuratAdministrasiView';
 
 const App: React.FC = () => {
@@ -265,6 +266,7 @@ const App: React.FC = () => {
           {activeTab === 'student-status' && profile.role === UserRole.STUDENT && <StudentStatusView state={studentStatus} />}
           {activeTab === 'scores' && <ScoresView role={profile.role} />}
           {activeTab === 'profile' && <ProfileView profile={profile} setProfile={setProfile} startups={startups} handleProfileUpdate={async e => { e.preventDefault(); setIsLoading(true); const { startupPosition, startupId, studentType, ...editableProfile } = profile; const result = await api.postData('updateProfile', editableProfile); setIsLoading(false); if (result?.status === 'success') { setProfile(await api.restoreSession()); showAlert('Profile Synced', 'Changes committed.', 'success'); } else showAlert('Gagal menyimpan', result?.message || 'Profil belum tersimpan.', 'error'); }} onFileUpload={handleFileUpload} />}
+          {activeTab === 'virtual-office' && <VirtualOfficeView isAdmin={profile.role === UserRole.ADMIN} />}
           {activeTab === 'mitra' && <MitraView userRole={profile.role} onShowAlert={showAlert} showConfirm={showConfirm} />}
           {activeTab === 'surat-administrasi' && profile.role !== UserRole.STUDENT && <SuratAdministrasiView userRole={profile.role} onShowAlert={showAlert} startups={startups} showConfirm={showConfirm} onFocusModeChange={setFocusMode} />}
           {activeTab === 'repo' && <RepoView profile={profile} onShowAlert={showAlert} isAdmin={isAdmin} assets={assets} showConfirm={showConfirm} />}

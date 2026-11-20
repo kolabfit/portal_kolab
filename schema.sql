@@ -330,3 +330,13 @@ CREATE TABLE IF NOT EXISTS facility_asset_history (
   INDEX idx_facility_history_asset (asset_id, id),
   CONSTRAINT fk_facility_history_asset FOREIGN KEY (asset_id) REFERENCES facility_assets(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+-- Pengaturan Virtual Office 3D
+CREATE TABLE IF NOT EXISTS virtual_office_settings (
+  id TINYINT UNSIGNED PRIMARY KEY,
+  is_published BOOLEAN NOT NULL DEFAULT TRUE,
+  room_overrides JSON NOT NULL,
+  version INT UNSIGNED NOT NULL DEFAULT 1
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+INSERT IGNORE INTO virtual_office_settings (id, room_overrides) VALUES (1, JSON_OBJECT());

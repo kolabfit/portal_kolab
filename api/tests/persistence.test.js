@@ -378,6 +378,60 @@ test('facility inventory is admin-only, starts empty, and records asset changes 
   assert.deepEqual((await inventory()).assets, assets);
 });
 
+test('Virtual Office is readable by all signed-in roles and only admins can control publication', async () => {
+  const office = (path = '', bearer = token, body) => fetch(base + '/virtual-office' + path, {
+    method: body ? 'PUT' : 'GET',
+    headers: {
+      ...(bearer ? { Authorization: `Bearer ${bearer}` } : {}),
+      ...(body ? { 'Content-Type': 'application/json' } : {})
+    },
+    body: body && JSON.stringify(body)
+  });
+  const initial = { published: true, rooms: {}, version: 1 };
+  assert.equal((await office('', null)).status, 401);
+  assert.equal((await office('/map', null)).status, 401);
+  assert.deepEqual(await (await office()).json(), initial);
+
+  for (const memberToken of [studentToken, lecturerToken]) {
+    assert.ok(memberToken);
+    assert.deepEqual(await (await office('', memberToken)).json(), { published: true, rooms: {} });
+    assert.equal((await office('', memberToken, initial)).status, 403);
+    const map = await office('/map', memberToken);
+    assert.equal(map.status, 200);
+    assert.equal(map.headers.get('content-type'), 'image/png');
+    assert.equal(map.headers.get('cache-control'), 'no-store');
+    assert.ok((await map.arrayBuffer()).byteLength > 1000);
+  }
+
+  const person = { id: 'person-one', name: 'Nama uji', title: 'Koordinator', point: { x: .4, z: .2 } };
+  const updates = { published: false, version: 1, rooms: { jago: {
+    name: '  Diskusi Ko+Lab  ', description: 'Informasi ruangan', people: [person]
+  } } };
+  const saved = { ...updates, version: 2, rooms: { jago: {
+    ...updates.rooms.jago, name: 'Diskusi Ko+Lab'
+  } } };
+  assert.equal((await office('', token, { ...updates, rooms: { unknown: {} } })).status, 400);
+  assert.equal((await office('', token, { ...updates, rooms: { jago: { name: 'X'.repeat(101) } } })).status, 400);
+  for (const people of [[{ ...person, point: { x: 9, z: 0 } }], [person, person], [{ ...person, title: '' }]]) {
+    assert.equal((await office('', token, { ...updates, rooms: { jago: { people } } })).status, 400);
+  }
+  assert.deepEqual(await (await office('', token, updates)).json(), saved);
+  assert.equal((await office('', token, updates)).status, 409);
+
+  for (const memberToken of [studentToken, lecturerToken]) {
+    assert.deepEqual(await (await office('', memberToken)).json(), { published: false });
+    assert.equal((await office('/map', memberToken)).status, 404);
+  }
+  assert.equal((await office('/map')).status, 200);
+  await (await import('../lib/virtualOffice.js')).migrateVirtualOffice(db);
+  assert.deepEqual(await (await office()).json(), saved);
+  assert.equal((await office('', token, { ...saved, published: true })).status, 200);
+  assert.deepEqual(await (await office('', studentToken)).json(), { published: true, rooms: saved.rooms });
+  assert.equal((await office('', lecturerToken, { ...saved, version: 3, rooms: {} })).status, 403);
+  assert.equal((await office('', token, { published: true, version: 3, rooms: {} })).status, 200);
+  assert.deepEqual(await (await office('', studentToken)).json(), { published: true, rooms: {} });
+});
+
 test('member administration persists identity, password, quota and deletion', async () => {
   await bridge('manageStartup', { type: 'add', id: 'startup', data: { name: 'Member Startup' } });
   for (const role of ['STUDENT', 'LECTURER']) {

@@ -1,3 +1,4 @@
+import type { VirtualOfficeSettings } from './lib/virtualOfficeRooms';
 import type { StudentMemberOverview, InternScoresResponse } from './types';
 /**
  * PORTAL KOLAB API GATEWAY
@@ -80,6 +81,30 @@ export const api = {
       console.error(`GET request failed for [${action}]:`, error);
       return null;
     }
+  },
+  async virtualOfficeRequest(settings?: VirtualOfficeSettings): Promise<VirtualOfficeSettings> {
+    const token = this.getToken();
+    if (!token) throw new Error('Silakan login kembali.');
+    const response = await fetch(`${API_BASE_URL}/virtual-office`, {
+      method: settings ? 'PUT' : 'GET', cache: 'no-store', signal: AbortSignal.timeout(15000),
+      headers: { Authorization: 'Bearer ' + token, ...(settings ? { 'Content-Type': 'application/json' } : {}) },
+      body: settings ? JSON.stringify(settings) : undefined
+    });
+    if (!response.ok) {
+      const result = await response.json().catch(() => null);
+      throw new Error(result?.message || 'Virtual Office belum dapat dimuat.');
+    }
+    return response.json();
+  },
+  async getVirtualOfficeMap(signal: AbortSignal): Promise<Blob> {
+    const token = this.getToken();
+    if (!token) throw new Error('Silakan login kembali.');
+    const response = await fetch(`${API_BASE_URL}/virtual-office/map`, {
+      cache: 'no-store', signal: AbortSignal.any([signal, AbortSignal.timeout(15000)]),
+      headers: { Authorization: 'Bearer ' + token }
+    });
+    if (!response.ok) throw new Error('Gambar denah belum dapat dimuat.');
+    return response.blob();
   },
   async facilityInventoryRequest<T>(path = '', method = 'GET', body?: unknown): Promise<T> {
     const token = this.getToken();
