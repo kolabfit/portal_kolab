@@ -3,7 +3,7 @@ import { Box, ChevronLeft, RotateCcw, RotateCw, Settings2 } from 'lucide-react';
 import { api } from '../api';
 import {
   virtualOfficeRoomIds, virtualOfficeRooms,
-  type VirtualOfficeArea, type VirtualOfficePerson, type VirtualOfficePoint,
+  type VirtualOfficeArea, type VirtualOfficeMember, type VirtualOfficeMemberRef, type VirtualOfficePerson, type VirtualOfficePoint,
   type VirtualOfficeRoomId, type VirtualOfficeRoomText, type VirtualOfficeSettings
 } from '../lib/virtualOfficeRooms';
 
@@ -16,6 +16,10 @@ type Scene = ReturnType<typeof import('../lib/virtualOfficeScene.js').mountVirtu
 type Overrides = NonNullable<VirtualOfficeSettings['rooms']>;
 type ProjectedPoint = { id: string; x: number; y: number; visible: boolean };
 const emptyPeople: VirtualOfficePerson[] = [];
+
+const memberKey = (member: VirtualOfficeMemberRef) => member.role + ':' + member.id;
+// crypto.randomUUID() needs HTTPS or localhost; the portal may be opened over plain HTTP on the LAN.
+const newId = () => globalThis.crypto?.randomUUID?.() ?? Date.now().toString(36) + Math.random().toString(36).slice(2);
 
 function requestError(error: unknown, fallback: string) {
   return error instanceof Error && error.name === 'Error' ? error.message : fallback;
@@ -125,8 +129,23 @@ function Viewer({ rooms, fixedArea, onPick, selectedPerson }: {
         <canvas ref={canvas} aria-label={'Model 3D ' + name} role="img" hidden={staticView}
           className={'absolute inset-0 h-full w-full touch-pan-y ' + (onPick ? 'cursor-crosshair' : 'cursor-grab active:cursor-grabbing')} />
         {status === 'ready' && !staticView && projection.map(marker => {
+          if (!marker.visible) return null;
+          if (area === 'overview') {
+            const id = marker.id as VirtualOfficeRoomId;
+            if (!virtualOfficeRooms[id]) return null;
+            const count = rooms[id]?.people?.length ?? 0;
+            return (
+              <div key={id} aria-hidden="true"
+                className="pointer-events-none absolute max-w-[8rem] -translate-x-1/2 -translate-y-1/2 rounded-md bg-white/90 px-2 py-1 text-center text-xs font-semibold leading-tight text-slate-900 shadow sm:max-w-[11rem]"
+                style={{ left: marker.x + '%', top: marker.y + '%' }}>
+                <span className="block truncate">{roomName(id)}</span>
+                {count > 0 && <span className="block font-normal text-slate-700">{count} orang</span>}
+              </div>
+            );
+          }
           const person = people.find(person => person.id === marker.id);
-          if (!person || !marker.visible) return null;
+          if (!person) return null;
+          const title = person.title || person.defaultTitle;
           return (
             <div key={marker.id} aria-hidden="true"
               className="pointer-events-none absolute max-w-[9rem] -translate-x-1/2 -translate-y-full text-center sm:max-w-[13rem]"
@@ -134,7 +153,7 @@ function Viewer({ rooms, fixedArea, onPick, selectedPerson }: {
               <div className={'rounded-md px-2 py-1 leading-tight shadow ' +
                 (selectedPerson === marker.id ? 'bg-orange-950 text-white ring-2 ring-orange-400' : 'bg-slate-900 text-white')}>
                 <span className="block truncate text-xs font-semibold">{person.name || 'Posisi baru'}</span>
-                {person.title && <span className="block truncate text-xs font-normal text-white/90">{person.title}</span>}
+                {title && <span className="block truncate text-xs font-normal text-white/90">{title}</span>}
               </div>
               <div className="mx-auto h-2 w-2 rounded-full bg-orange-500 ring-1 ring-white" />
             </div>
@@ -195,7 +214,7 @@ function Viewer({ rooms, fixedArea, onPick, selectedPerson }: {
             {people.map(person => (
               <li key={person.id} className="max-w-full break-words rounded-lg bg-slate-100 px-3 py-2 text-sm">
                 <span className="font-semibold">{person.name}</span>
-                <span className="block text-slate-700">{person.title}</span>
+                <span className="block text-slate-700">{person.title || person.defaultTitle}</span>
               </li>
             ))}
           </ul>
@@ -213,10 +232,30 @@ function PeopleEditor({ rooms, update }: {
   const [selectedId, setSelectedId] = useState<string>();
   const people = rooms[room]?.people ?? emptyPeople;
   const selected = people.find(person => person.id === selectedId);
+  const [members, setMembers] = useState<VirtualOfficeMember[]>();
+  const [membersError, setMembersError] = useState('');
+  const placed = new Set(virtualOfficeRoomIds.flatMap(id => rooms[id]?.people ?? emptyPeople)
+    .flatMap(person => person.member ? [memberKey(person.member)] : []));
+  const available = (members ?? []).filter(member => !placed.has(memberKey(member)));
+
+  useEffect(() => {
+    let mounted = true;
+    api.virtualOfficeMembers().then(result => {
+      if (mounted) setMembers(result);
+    }).catch(error => {
+      if (mounted) setMembersError(requestError(error, 'Daftar mahasiswa dan dosen belum dapat dimuat.'));
+    });
+    return () => { mounted = false; };
+  }, []);
 
   function edit(change: Partial<VirtualOfficePerson>) {
     if (!selected) return;
     update(room, people.map(person => person.id === selected.id ? { ...person, ...change } : person));
+  }
+
+  function add(person: VirtualOfficePerson) {
+    update(room, [...people, person]);
+    setSelectedId(person.id);
   }
 
   return (
@@ -236,12 +275,31 @@ function PeopleEditor({ rooms, update }: {
             </select>
           </label>
         </div>
-        <button type="button" className={secondary} disabled={people.length >= 40} onClick={() => {
-          const id = crypto.randomUUID();
-          update(room, [...people, { id, name: '', title: '' }]);
-          setSelectedId(id);
-        }}>Tambah orang</button>
+        <div className="flex flex-wrap items-end gap-2">
+          <label className="block w-full max-w-xs space-y-1 text-sm">
+            <span>Tambah mahasiswa atau dosen</span>
+            <select className={inputStyle} value="" disabled={people.length >= 40 || !available.length} onChange={event => {
+              const member = available.find(candidate => memberKey(candidate) === event.target.value);
+              if (member) add({
+                id: newId(), member: { role: member.role, id: member.id },
+                name: member.name, title: '', defaultTitle: member.title
+              });
+            }}>
+              <option value="">{!members ? 'Memuat daftar…' : available.length ? 'Pilih orang…' : 'Semua sudah punya posisi'}</option>
+              {(['STUDENT', 'LECTURER'] as const).map(role => (
+                <optgroup key={role} label={role === 'STUDENT' ? 'Mahasiswa' : 'Dosen'}>
+                  {available.filter(member => member.role === role).map(member => (
+                    <option key={memberKey(member)} value={memberKey(member)}>{member.name} ({member.id}) · {member.title}</option>
+                  ))}
+                </optgroup>
+              ))}
+            </select>
+          </label>
+          <button type="button" className={secondary} disabled={people.length >= 40}
+            onClick={() => add({ id: newId(), name: '', title: '' })}>Tambah orang lain</button>
+        </div>
       </div>
+      {membersError && <p role="alert" className="text-sm text-red-700">{membersError}</p>}
       {people.length === 0 && <p className="text-sm text-slate-600">Belum ada penanda di ruang ini.</p>}
       {people.length > 0 && (
         <ul className="divide-y divide-slate-200">
@@ -249,7 +307,11 @@ function PeopleEditor({ rooms, update }: {
             <li key={person.id} className="flex flex-wrap items-center justify-between gap-2 py-2">
               <p className="min-w-0 break-words text-sm">
                 <span className="font-semibold">{person.name || 'Orang baru'}</span>
-                {person.title && <span className="block text-slate-700">{person.title}</span>}
+                {person.member && <span className="ml-2 rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-700">
+                  {person.member.role === 'STUDENT' ? 'Mahasiswa' : 'Dosen'}
+                </span>}
+                {(person.title || person.defaultTitle) && <span className="block text-slate-700">{person.title || person.defaultTitle}</span>}
+                {person.inactive && <span className="block font-medium text-red-700">Akun tidak aktif. Hapus penanda ini sebelum menyimpan.</span>}
               </p>
               <div className="flex flex-wrap gap-2">
                 <button type="button" className={secondary} aria-pressed={selectedId === person.id}
@@ -268,13 +330,15 @@ function PeopleEditor({ rooms, update }: {
           <div className="grid gap-3 sm:grid-cols-2">
             <label className="block space-y-1 text-sm">
               <span>Nama orang</span>
-              <input className={inputStyle} value={selected.name} maxLength={100}
-                onChange={event => edit({ name: event.target.value })} />
+              <input className={inputStyle + (selected.member ? ' bg-slate-100' : '')} value={selected.name} maxLength={100}
+                readOnly={!!selected.member} onChange={event => edit({ name: event.target.value })} />
+              {selected.member && <span className="block text-slate-600">Nama mengikuti profil {selected.member.role === 'STUDENT' ? 'mahasiswa' : 'dosen'}.</span>}
             </label>
             <label className="block space-y-1 text-sm">
               <span>Jabatan</span>
-              <input className={inputStyle} value={selected.title} maxLength={120}
+              <input className={inputStyle} value={selected.title} maxLength={120} placeholder={selected.defaultTitle}
                 onChange={event => edit({ title: event.target.value })} />
+              {selected.member && <span className="block text-slate-600">Kosongkan untuk memakai jabatan dari profil.</span>}
             </label>
           </div>
           <p className="text-sm text-slate-600" role="status">
@@ -329,10 +393,10 @@ function Settings({
     setError('');
     setNotice('');
     const incomplete = virtualOfficeRoomIds.find(id => rooms[id]?.people?.some(person =>
-      !person.name.trim() || !person.title.trim() || !person.point
+      !person.point || person.inactive || (!person.member && (!person.name.trim() || !person.title.trim()))
     ));
     if (incomplete) {
-      setError(`Lengkapi nama, jabatan, dan posisi untuk setiap penanda di ${virtualOfficeRooms[incomplete].name}.`);
+      setError(`Periksa penanda di ${virtualOfficeRooms[incomplete].name}: lengkapi nama, jabatan, dan posisi, lalu hapus akun yang tidak aktif.`);
       return;
     }
     setSaving(true);

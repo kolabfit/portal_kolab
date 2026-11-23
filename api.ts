@@ -1,4 +1,4 @@
-import type { VirtualOfficeSettings } from './lib/virtualOfficeRooms';
+import type { VirtualOfficeMember, VirtualOfficeSettings } from './lib/virtualOfficeRooms';
 import type { StudentMemberOverview, InternScoresResponse } from './types';
 /**
  * PORTAL KOLAB API GATEWAY
@@ -94,6 +94,15 @@ export const api = {
       const result = await response.json().catch(() => null);
       throw new Error(result?.message || 'Virtual Office belum dapat dimuat.');
     }
+    return response.json();
+  },
+  async virtualOfficeMembers(): Promise<VirtualOfficeMember[]> {
+    const token = this.getToken();
+    if (!token) throw new Error('Silakan login kembali.');
+    const response = await fetch(`${API_BASE_URL}/virtual-office/members`, {
+      cache: 'no-store', signal: AbortSignal.timeout(15000), headers: { Authorization: 'Bearer ' + token }
+    });
+    if (!response.ok) throw new Error('Daftar mahasiswa dan dosen belum dapat dimuat.');
     return response.json();
   },
   async getVirtualOfficeMap(signal: AbortSignal): Promise<Blob> {

@@ -430,6 +430,36 @@ test('Virtual Office is readable by all signed-in roles and only admins can cont
   assert.equal((await office('', lecturerToken, { ...saved, version: 3, rooms: {} })).status, 403);
   assert.equal((await office('', token, { published: true, version: 3, rooms: {} })).status, 200);
   assert.deepEqual(await (await office('', studentToken)).json(), { published: true, rooms: {} });
+
+  // People linked to student/lecturer accounts take name and title from the profile.
+  assert.equal((await office('/members', studentToken)).status, 403);
+  const members = await (await office('/members')).json();
+  assert.ok(members.some(member => member.role === 'STUDENT' && member.id === 'test-student' && member.title));
+  const [[student]] = await db.execute("SELECT name FROM students WHERE nim='test-student'");
+  const linked = { id: 'member-one', member: { role: 'STUDENT', id: 'test-student' }, name: 'ignored', title: '', point: { x: 0, z: 0 } };
+  const placed = await office('', token, { published: true, version: 4, rooms: { studio: { people: [linked] } } });
+  assert.equal(placed.status, 200);
+  const adminPerson = (await placed.json()).rooms.studio.people[0];
+  assert.equal(adminPerson.name, student.name);
+  assert.deepEqual(adminPerson.member, linked.member);
+  assert.ok(adminPerson.defaultTitle);
+  assert.deepEqual((await (await office('', studentToken)).json()).rooms.studio.people,
+    [{ id: 'member-one', name: student.name, title: adminPerson.defaultTitle, point: { x: 0, z: 0 } }]);
+  for (const rooms of [
+    { studio: { people: [linked] }, jago: { people: [{ ...linked, id: 'member-two' }] } },
+    { studio: { people: [{ ...linked, member: { role: 'STUDENT', id: 'missing-member' } }] } }
+  ]) {
+    const rejected = await office('', token, { published: true, version: 5, rooms });
+    assert.equal(rejected.status, 400);
+    assert.notEqual((await rejected.json()).message, 'Pengaturan Virtual Office tidak valid.');
+  }
+
+  // Inactive accounts disappear for members and are flagged for admins.
+  await db.execute("UPDATE students SET is_active=0 WHERE nim='test-student'");
+  assert.deepEqual((await (await office('', lecturerToken)).json()).rooms.studio.people, []);
+  assert.equal((await (await office()).json()).rooms.studio.people[0].inactive, true);
+  await db.execute("UPDATE students SET is_active=1 WHERE nim='test-student'");
+  assert.equal((await office('', token, { published: true, version: 5, rooms: {} })).status, 200);
 });
 
 test('member administration persists identity, password, quota and deletion', async () => {

@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="id">
+<head><meta charset="utf-8"><title>Virtual Office harness</title></head>
+<body style="margin:0;background:#f3f1ea;font-family:sans-serif">
+  <div style="position:relative;width:1100px;height:680px">
+    <canvas id="office" style="width:100%;height:100%;display:block"></canvas>
+    <div id="labels"></div>
+  </div>
+  <script type="module">
+    import { mountVirtualOffice } from '/lib/virtualOfficeScene.js';
+    const params = new URLSearchParams(location.search);
+    const labels = document.getElementById('labels');
+    window.frames = 0;
+    const scene = mountVirtualOffice(document.getElementById('office'), {
+      onSelect: id => { window.selected = id; },
+      onUnavailable: () => { window.unavailable = true; },
+      onPick: point => { window.picked = point; },
+      onProjection: points => {
+        window.projection = points;
+        window.frames++;
+        if (params.has('labels')) labels.innerHTML = points.filter(point => point.visible).map(point =>
+          `<span style="position:absolute;left:${point.x}%;top:${point.y}%;transform:translate(-50%,-50%);background:#fffe;padding:2px 6px;border-radius:4px;font-size:12px;font-weight:600">${point.id}</span>`
+        ).join('');
+      }
+    }, params.get('area') || 'overview');
+    if (params.has('markers')) scene.setMarkers(JSON.parse(params.get('markers')));
+  </script>
+</body>
+</html>

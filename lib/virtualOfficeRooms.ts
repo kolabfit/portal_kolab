@@ -1,6 +1,6 @@
 export const virtualOfficeRooms = {
   "ngolab": {
-    "name": "Ruang Ngolab / Dapur Coworking",
+    "name": "Dapur Ngolab",
     "description": "Meja kompor di sisi kiri, jalur di antara konter dan kasir, serta showcase di sebelah kanan kasir."
   },
   "coworking": {
@@ -28,7 +28,13 @@ export const virtualOfficeRooms = {
 export type VirtualOfficeRoomId = keyof typeof virtualOfficeRooms;
 export type VirtualOfficeArea = 'overview' | VirtualOfficeRoomId;
 export type VirtualOfficePoint = { x: number; z: number };
-export type VirtualOfficePerson = { id: string; name: string; title: string; point?: VirtualOfficePoint };
+export type VirtualOfficeMemberRef = { role: 'STUDENT' | 'LECTURER'; id: string };
+export type VirtualOfficeMember = VirtualOfficeMemberRef & { name: string; title: string };
+// member links a student/lecturer (sent to admins only); the API fills defaultTitle and inactive for admins.
+export type VirtualOfficePerson = {
+  id: string; name: string; title: string; point?: VirtualOfficePoint;
+  member?: VirtualOfficeMemberRef; defaultTitle?: string; inactive?: boolean;
+};
 export type VirtualOfficeRoomText = { name: string; description: string; people?: VirtualOfficePerson[] };
 export type VirtualOfficeSettings = { published: boolean; rooms?: Partial<Record<VirtualOfficeRoomId, VirtualOfficeRoomText>>; version?: number };
 export const virtualOfficeRoomIds = Object.keys(virtualOfficeRooms) as VirtualOfficeRoomId[];
