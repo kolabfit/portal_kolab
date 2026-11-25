@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { Event, UserRole } from '../types';
 import { api } from '../api';
+import { parseMeetingLink } from '../api/lib/meetingLinks.js';
 import DropZone from '../components/DropZone';
 
 interface EventsViewProps {
@@ -93,6 +94,8 @@ const EventsView: React.FC<EventsViewProps> = ({ events, isAdmin, currentUser, o
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    const meeting = parseMeetingLink(meetLinkValue);
+    if (isOnlineMode && !meeting) { onShowAlert('Link tidak valid', 'Tempel link Google Meet atau Zoom.', 'error'); return; }
     setIsProcessing(true);
     const fd = new FormData(e.currentTarget);
     const eventId = editingItem?.id || `evt-${Date.now()}`;
@@ -110,7 +113,7 @@ const EventsView: React.FC<EventsViewProps> = ({ events, isAdmin, currentUser, o
       description: fd.get('description'), locationOffline: isOnlineMode ? '' : fd.get('locationOffline'),
       locationOnline: isOnlineMode ? 'Yes' : 'No', maxParticipants: Number(fd.get('maxParticipants')),
       status: fd.get('status'), tags: String(fd.get('tags')).split(',').map(t => t.trim()),
-      meetLink: isOnlineMode ? meetLinkValue : '', author: editingItem ? editingItem.author : (isAdmin ? 'ROOT' : currentUser)
+      meetLink: isOnlineMode ? meeting!.url : '', author: editingItem ? editingItem.author : (isAdmin ? 'ROOT' : currentUser)
     };
     const res = await api.postData('manageEvent', { type: editingItem ? 'edit' : 'add', id: eventId, data: payload });
     if (res?.status === 'success') { 
@@ -201,7 +204,7 @@ const EventsView: React.FC<EventsViewProps> = ({ events, isAdmin, currentUser, o
                     </p>
                  </div>
 
-                 {previewItem.locationOnline === "Yes" && previewItem.meetLink && (
+                 {previewItem.locationOnline === "Yes" && parseMeetingLink(previewItem.meetLink) && (
                    <div className="bg-emerald-50 p-10 rounded-[3rem] border-2 border-emerald-100 flex flex-col md:flex-row items-center justify-between gap-8 group">
                       <div className="flex items-center gap-6">
                          <div className="w-16 h-16 rounded-2xl flex items-center justify-center shadow-xl group-hover:scale-110 transition-transform bg-emerald-500 text-white">
@@ -212,10 +215,10 @@ const EventsView: React.FC<EventsViewProps> = ({ events, isAdmin, currentUser, o
                             <p className="text-xs font-bold text-emerald-600 uppercase tracking-widest mt-1">Authorized Member Cluster Only</p>
                          </div>
                       </div>
-                      <a href={previewItem.meetLink} target="_blank" rel="noopener noreferrer"
+                      <a href={parseMeetingLink(previewItem.meetLink)!.url} target="_blank" rel="noopener noreferrer"
                         className="w-full md:w-auto px-10 py-5 bg-white text-emerald-600 rounded-2xl font-black uppercase text-[10px] tracking-[0.2em] shadow-xl hover:bg-emerald-600 hover:text-white transition-all flex items-center justify-center gap-4"
                       >
-                         Join Transmission <ExternalLink size={18}/>
+                         Gabung {parseMeetingLink(previewItem.meetLink)!.label} <ExternalLink size={18}/>
                       </a>
                    </div>
                  )}
@@ -321,7 +324,12 @@ const EventsView: React.FC<EventsViewProps> = ({ events, isAdmin, currentUser, o
                       {!isOnlineMode ? (
                         <input name="locationOffline" defaultValue={editingItem?.locationOffline} placeholder="Source Venue" className="w-full px-6 py-4 bg-slate-50 rounded-2xl font-bold outline-none border border-transparent focus:border-orange-100 transition-all shadow-inner" />
                       ) : (
-                        <input value={meetLinkValue} onChange={e => setMeetLinkValue(e.target.value)} placeholder="Tempel link Google Meet (https://meet.google.com/...)" className="w-full px-6 py-4 bg-emerald-50 rounded-2xl font-bold outline-none border border-transparent focus:border-emerald-200 transition-all shadow-inner"/>
+                        <div className="space-y-1">
+                          <input aria-label="Link meeting" value={meetLinkValue} onChange={e => setMeetLinkValue(e.target.value)} required placeholder="https://meet.google.com/... atau https://zoom.us/j/..." className="w-full px-6 py-4 bg-emerald-50 rounded-2xl font-bold outline-none border border-transparent focus:border-emerald-200 transition-all shadow-inner"/>
+                          <p role="status" className={`text-[10px] font-bold ml-2 ${parseMeetingLink(meetLinkValue) ? 'text-emerald-600' : 'text-rose-500'}`}>
+                            {parseMeetingLink(meetLinkValue) ? `Terdeteksi: ${parseMeetingLink(meetLinkValue)!.label}` : meetLinkValue ? 'Hanya link Google Meet atau Zoom yang diterima.' : 'Tempel link Google Meet atau Zoom.'}
+                          </p>
+                        </div>
                       )}
                       
                       <div className="grid grid-cols-2 gap-4">
