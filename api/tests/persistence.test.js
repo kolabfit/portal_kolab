@@ -537,15 +537,48 @@ test('assets, streaming playlists and TV persist without field loss', async () =
   for (const [key, value] of Object.entries(assets)) assert.deepEqual(result[key], value);
   await bridge('updateAssets', { ...assets, logoUrl: 'new-logo' });
   assert.equal((await request('/data/assets')).logoUrl, 'new-logo');
-  await bridge('manageYPlaylist', { type: 'add', data: { playlistId: 'pl', title: 'Playlist', publishedAt: '2026-09-17T00:00:00Z', channelTitle: 'Channel' } });
-  await bridge('manageYPlaylist', { type: 'edit', id: 'pl', data: { playlistId: 'pl', title: 'Edited playlist' } });
-  const tv = await bridge('manageTvLive', { type: 'add', data: { title: 'TV', videoId: 'video-id' } });
-  await bridge('manageTvLive', { type: 'edit', id: tv.id, data: { title: 'TV edited', videoId: 'new-video-id' } });
+  await bridge('manageYPlaylist', { type: 'add', data: { playlistId: 'PLtestPlaylist01', title: 'Playlist', category: 'KULIAH', channelTitle: 'Channel' } });
+  await bridge('manageYPlaylist', { type: 'edit', id: 'PLtestPlaylist01', data: { title: 'Edited playlist' } });
+  const tv = await bridge('manageTvLive', { type: 'add', data: { title: 'TV', videoId: 'dQw4w9WgXcQ' } });
+  await bridge('manageTvLive', { type: 'edit', id: tv.id, data: { title: 'TV edited', videoId: 'jfKfPfyJRdk' } });
   result = await request('/data/assets');
   assert.equal(result.yPlaylists[0].title, 'Edited playlist');
-  assert.equal(result.tvChannels[0].videoId, 'new-video-id');
+  assert.equal(result.tvChannels[0].videoId, 'jfKfPfyJRdk');
+  assert.equal(result.tvChannels[0].thumbnail, 'https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg');
   assert.equal(result.tvChannels.length, 1);
-  await bridge('manageYPlaylist', { type: 'delete', id: 'pl' });
+
+  // Validation: bad IDs, category and thumbnail are rejected.
+  await bridge('manageYPlaylist', { type: 'add', data: { playlistId: 'pl', title: 'X' } }, token, 400);
+  await bridge('manageTvLive', { type: 'add', data: { title: 'X', videoId: 'bad id' } }, token, 400);
+  await bridge('manageTvLive', { type: 'add', data: { title: 'X', videoId: 'dQw4w9WgXcQ', category: 'NOPE' } }, token, 400);
+  await bridge('manageTvLive', { type: 'add', data: { title: 'X', videoId: 'dQw4w9WgXcQ', thumbnail: 'javascript:alert(1)' } }, token, 400);
+
+  // Lecturers publish directly; students propose and wait for approval.
+  const lecturerItem = await bridge('manageYPlaylist', { type: 'add', data: { playlistId: 'PLlecturerList01', title: 'Kuliah', category: 'KULIAH' } }, lecturerToken);
+  assert.equal(lecturerItem.itemStatus, 'APPROVED');
+  const proposal = await bridge('manageTvLive', { type: 'add', data: { title: 'Usulan', videoId: 'aaaaaaaaaaa', category: 'WEBINAR' } }, studentToken);
+  assert.equal(proposal.itemStatus, 'PENDING');
+  assert.ok(!(await request('/data/assets')).tvChannels.some(item => item.id === proposal.id));
+  const studentView = await bridge('getStreamingCatalog', {}, studentToken);
+  assert.deepEqual(studentView.tv.find(item => item.id === proposal.id), {
+    id: proposal.id, videoId: 'aaaaaaaaaaa', title: 'Usulan', thumbnail: 'https://i.ytimg.com/vi/aaaaaaaaaaa/hqdefault.jpg',
+    category: 'WEBINAR', status: 'PENDING', addedByName: studentView.tv.find(item => item.id === proposal.id).addedByName, canDelete: true
+  });
+  assert.ok(!(await bridge('getStreamingCatalog', {}, lecturerToken)).tv.some(item => item.id === proposal.id));
+  assert.equal((await bridge('getStreamingCatalog', {}, lecturerToken)).playlists.find(item => item.playlistId === 'PLlecturerList01').canDelete, true);
+  assert.equal((await bridge('getStreamingCatalog', {}, studentToken)).playlists.find(item => item.playlistId === 'PLlecturerList01').canDelete, false);
+
+  // Only owners or admins delete; only admins approve or edit; students cannot overwrite an existing playlist.
+  await bridge('manageYPlaylist', { type: 'delete', id: 'PLlecturerList01' }, studentToken, 403);
+  await bridge('manageYPlaylist', { type: 'add', data: { playlistId: 'PLlecturerList01', title: 'Takeover' } }, studentToken, 409);
+  await bridge('manageTvLive', { type: 'approve', id: proposal.id }, studentToken, 403);
+  await bridge('manageTvLive', { type: 'edit', id: proposal.id, data: { title: 'Y' } }, lecturerToken, 403);
+  await bridge('manageTvLive', { type: 'approve', id: proposal.id });
+  assert.ok((await request('/data/assets')).tvChannels.some(item => item.id === proposal.id));
+  await bridge('manageTvLive', { type: 'delete', id: proposal.id }, studentToken);
+  await bridge('manageYPlaylist', { type: 'delete', id: 'PLlecturerList01' }, lecturerToken);
+
+  await bridge('manageYPlaylist', { type: 'delete', id: 'PLtestPlaylist01' });
   await bridge('manageTvLive', { type: 'delete', id: tv.id });
   assert.deepEqual((await request('/data/assets')).tvChannels, []);
 });

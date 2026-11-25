@@ -3,12 +3,14 @@ import db from '../lib/db.js';
 import { internshipsSchema } from '../lib/internships.js';
 import { migrateFacilityInventory } from '../lib/facilityInventory.js';
 import { migrateVirtualOffice } from '../lib/virtualOffice.js';
+import { migrateStreaming } from '../lib/streaming.js';
 
 export async function migrate() {
   await migrateStartupPosition(db);
   await db.execute(internshipsSchema);
   await migrateFacilityInventory(db);
   await migrateVirtualOffice(db);
+  await migrateStreaming(db);
   await db.execute(`CREATE TABLE IF NOT EXISTS workloads (
     id VARCHAR(50) PRIMARY KEY, name VARCHAR(255) NOT NULL, category VARCHAR(30) NOT NULL,
     description TEXT, start_date DATE, end_date DATE, status VARCHAR(30) NOT NULL DEFAULT 'PLANNED',

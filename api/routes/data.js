@@ -27,8 +27,8 @@ router.get('/assets', async (req, res) => {
     const admin = adminRows[0] || {};
 
     // Fetch dynamic data from MySQL
-    const [yPlaylists] = await db.execute('SELECT * FROM yplaylists');
-    const [tvChannels] = await db.execute('SELECT * FROM tvlive');
+    const [yPlaylists] = await db.execute("SELECT * FROM yplaylists WHERE status='APPROVED'");
+    const [tvChannels] = await db.execute("SELECT * FROM tvlive WHERE status='APPROVED'");
 
     res.json({
       bgFront: assets.bg_front || "",

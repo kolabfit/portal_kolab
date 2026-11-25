@@ -153,3 +153,14 @@ Menu **Virtual Office 3D** tersedia untuk admin, mahasiswa, dan dosen setelah lo
 Admin dapat membuka **Kelola Virtual Office** untuk mengubah nama dan deskripsi setiap area atau mengatur publikasi denah. Admin juga bisa menambah, memindahkan, mengedit, dan menghapus penanda orang dari bagian **Posisi orang di denah**. Pilih ruang, lalu pilih orang dari **Tambah mahasiswa atau dosen**. Nama dan jabatan diambil dari profil: posisi startup untuk mahasiswa startup, job desk untuk mahasiswa lain, dan job desk pertama untuk dosen. Kosongkan kolom jabatan untuk memakai data profil, atau isi untuk menggantinya. Untuk tamu atau staf tanpa akun, pilih **Tambah orang lain** dan isi nama serta jabatan. Klik lantai pada model 3D, lalu **Simpan pengaturan**. Setiap mahasiswa atau dosen hanya bisa punya satu posisi. Akun yang dinonaktifkan atau belum disetujui otomatis disembunyikan dari denah dan ditandai untuk admin. Penanda muncul di tampilan ruang dan daftar orang pada ruang tersebut.
 
 Ukuran ruang dan lebar lorong masih perkiraan dan disimpan di `api/lib/virtualOfficeFloors.js`. Scene 3D dan validasi API memakai file yang sama. Posisi ruang pada denah gabungan dihitung dari ukuran tersebut di `overviewPlan()` (`lib/virtualOfficeScene.js`). Setelah mengubah ukuran, jalankan `npm test` dan `npx playwright test tests/browser/virtual-office.spec.ts`, lalu render ulang `api/assets/virtual-office-map.png` dari `tests/browser/virtual-office.html?labels`. Instalasi baru memakai `schema.sql`. Untuk database yang sudah ada, jalankan `npm --prefix api run db:migrate`, lalu mulai ulang backend. Denah ditayangkan secara bawaan.
+
+## Streaming Hub
+
+Menu **Streaming Hub** punya empat bagian. Klik ikon **?** di halaman untuk panduan singkat.
+
+- **YouTube Saya** dan **Musik Saya**: playlist pribadi. Klik ikon ⚙ lalu tempel link YouTube atau Spotify. Hanya pemiliknya yang melihat. Jika kosong, playlist bawaan admin dari Settings yang diputar.
+- **Katalog Video** (playlist YouTube) dan **TV Live** (siaran langsung YouTube): katalog bersama dengan kategori Materi Kuliah, Webinar & Seminar, Startup & Bisnis, Hiburan, dan Lainnya.
+
+Untuk menambah ke katalog, tempel link YouTube, isi judul, lalu pilih kategori. ID dan thumbnail video diambil otomatis. Admin dan dosen langsung menayangkan item. Mahasiswa mengusulkan item, lalu admin memilih **Setujui** atau **Tolak**. Usulan yang belum disetujui hanya terlihat oleh admin dan pengusulnya. Admin bisa menghapus semua item. Dosen dan mahasiswa hanya bisa menghapus item yang mereka tambahkan sendiri.
+
+Hanya link YouTube dan Spotify yang diterima. Kode `<iframe>` lama tetap bisa diputar, karena hanya URL di dalamnya yang dipakai. Server menambahkan kolom `category`, `status`, dan `added_by_*` ke `yplaylists` dan `tvlive` saat start, atau lewat `npm --prefix api run db:migrate`. Item lama otomatis berstatus disetujui dengan kategori Lainnya.

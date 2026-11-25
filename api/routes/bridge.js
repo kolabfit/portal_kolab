@@ -9,6 +9,7 @@ import { repositoryActions, repositoryAction } from '../lib/repository.js';
 import { manageInternship } from '../lib/internships.js';
 import { saveArticleRelations } from '../lib/articleRelations.js';
 import { validateArticleContent } from '../lib/articleHtml.js';
+import { streamingActions, streamingAction, streamingCatalog } from '../lib/streaming.js';
 
 const router = express.Router();
 const GAS_URL = process.env.GAS_URL;
@@ -38,12 +39,12 @@ router.post('/', requireSession, async (req, res) => {
   let db;
   try {
     if (repositoryActions.includes(action)) return res.json(await repositoryAction(req));
-    const adminActions = ['getStudents', 'getLecturers', 'manageMember', 'bulkManageMembers', 'manageInternshipsBulk', 'updateMemberStorage', 'manageStartup', 'updateAssets', 'manageCategory', 'manageTag', 'manageYPlaylist', 'yplaylistAction', 'manageTvLive', 'tvliveAction', 'manageInternship'];
+    const adminActions = ['getStudents', 'getLecturers', 'manageMember', 'bulkManageMembers', 'manageInternshipsBulk', 'updateMemberStorage', 'manageStartup', 'updateAssets', 'manageCategory', 'manageTag', 'manageInternship'];
     if (adminActions.includes(action) && req.user.role !== 'ADMIN') return res.status(403).json({ status: 'error', message: 'Akses admin diperlukan.' });
     db = await pool.getConnection();
     await db.beginTransaction();
     const success = async result => {
-      if (!['getStudents', 'getLecturers'].includes(action)) {
+      if (!['getStudents', 'getLecturers', 'getStreamingCatalog'].includes(action)) {
         await db.execute('INSERT INTO system_logs (timestamp,action,user_id,details) VALUES (NOW(),?,?,?)', [action, req.user.id, JSON.stringify({
           id: id || payload.targetId || null,
           type,
@@ -60,12 +61,13 @@ router.post('/', requireSession, async (req, res) => {
       await saveProfile(db, req.user.role, req.user.role === 'ADMIN' ? req.user.username : req.user.id, payload);
       return await success({ status: 'success', id });
     }
-    const collection = { manageStartup: 'startup_teams', manageInformasi: 'information', manageSchedule: 'schedules', scheduleAction: 'schedules', manageEvent: 'events', eventAction: 'events', manageArticle: 'articles', articleAction: 'articles', manageCategory: 'article_categories', manageTag: 'article_tags', manageTvLive: 'tvlive', tvliveAction: 'tvlive', manageYPlaylist: 'yplaylists', yplaylistAction: 'yplaylists' }[action];
+    if (action === 'getStreamingCatalog') return await success(await streamingCatalog(db, req.user));
+    if (streamingActions.includes(action)) return await success(await streamingAction(db, req.user, { ...payload, id }));
+    const collection = { manageStartup: 'startup_teams', manageInformasi: 'information', manageSchedule: 'schedules', scheduleAction: 'schedules', manageEvent: 'events', eventAction: 'events', manageArticle: 'articles', articleAction: 'articles', manageCategory: 'article_categories', manageTag: 'article_tags' }[action];
     if (collection) {
       if (!['add', 'edit', 'delete'].includes(type)) throw Object.assign(new Error('Operasi tidak valid.'), { status: 400 });
       if (type !== 'add') {
-        const field = collection === 'yplaylists' ? 'playlist_id' : 'id';
-        const [[existing]] = await db.execute(`SELECT * FROM ${collection} WHERE ${field}=? FOR UPDATE`, [id || '']);
+        const [[existing]] = await db.execute(`SELECT * FROM ${collection} WHERE id=? FOR UPDATE`, [id || '']);
         if (!existing) throw Object.assign(new Error('Data tidak ditemukan.'), { status: 404 });
         if (type === 'edit') data = { ...record(existing), ...(collection === 'events' ? { image: existing.image_url } : {}), ...(collection === 'startup_teams' ? { logoUrl: existing.logo } : {}), ...data };
       }
@@ -468,24 +470,6 @@ router.post('/', requireSession, async (req, res) => {
           );
         }
         if (type !== 'delete') await saveArticleRelations(db, id, data, req.user);
-        return await success({ status: 'success', id });
-
-      case 'manageYPlaylist':
-      case 'yplaylistAction':
-        if (type === 'delete') await db.execute('DELETE FROM yplaylists WHERE playlist_id=?', [id]);
-        else await db.execute(
-          'INSERT INTO yplaylists (playlist_id, title, thumbnail, published_at, channel_title) VALUES (?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE title=VALUES(title), thumbnail=VALUES(thumbnail), published_at=VALUES(published_at), channel_title=VALUES(channel_title)',
-          [data.playlistId || id, data.title, data.thumbnail || '', data.publishedAt ? String(data.publishedAt).replace('T', ' ').replace(/Z$/, '').slice(0, 19) : new Date(), data.channelTitle || 'Manual Hub']
-        );
-        return await success({ status: 'success', id });
-
-      case 'manageTvLive':
-      case 'tvliveAction':
-        if (type === 'delete') await db.execute('DELETE FROM tvlive WHERE id=?', [id]);
-        else await db.execute(
-          'INSERT INTO tvlive (id, title, video_id, thumbnail) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE title=VALUES(title), video_id=VALUES(video_id), thumbnail=VALUES(thumbnail)',
-          [generatedId('tv', id), data.title, data.videoId, data.thumbnail || '']
-        );
         return await success({ status: 'success', id });
 
       case 'generateMeetLink':
