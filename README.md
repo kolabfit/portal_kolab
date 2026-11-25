@@ -156,11 +156,17 @@ Ukuran ruang dan lebar lorong masih perkiraan dan disimpan di `api/lib/virtualOf
 
 ## Streaming Hub
 
-Menu **Streaming Hub** punya empat bagian. Klik ikon **?** di halaman untuk panduan singkat.
+Streaming Hub dipakai untuk menyimpan dan membagikan apa saja yang bermanfaat dari YouTube atau Spotify. Contohnya musik kerja, podcast, rekaman acara, materi, inspirasi, dan hiburan. Klik ikon **?** di halaman untuk panduan singkat.
 
-- **YouTube Saya** dan **Musik Saya**: playlist pribadi. Klik ikon ⚙ lalu tempel link YouTube atau Spotify. Hanya pemiliknya yang melihat. Jika kosong, playlist bawaan admin dari Settings yang diputar.
-- **Katalog Video** (playlist YouTube) dan **TV Live** (siaran langsung YouTube): katalog bersama dengan kategori Materi Kuliah, Webinar & Seminar, Startup & Bisnis, Hiburan, dan Lainnya.
+- **Tambah**: tempel link YouTube (video, playlist, live, shorts) atau Spotify (playlist, album, lagu, artis, podcast, episode), lalu isi judul dan kategori. Setiap anggota boleh menyimpan banyak item, sampai 200 per akun.
+- **Koleksi Saya**: semua item milik sendiri. Item **Pribadi** hanya terlihat oleh pemiliknya.
+- **Katalog Bersama**: item yang dicentang **Bagikan ke Katalog Bersama**, dengan filter platform (YouTube/Spotify) dan kategori. Kategorinya Edukasi, Musik, Podcast, Hiburan, Inspirasi, Startup & Bisnis, Event & Webinar, Siaran Live, dan Lainnya.
+- Item yang dibagikan admin atau dosen langsung tampil. Item mahasiswa tampil setelah admin memilih **Setujui**. Kalau mahasiswa mengubah item yang sudah dibagikan, item itu ditinjau ulang. Pemilik bisa mengubah dan menghapus itemnya sendiri. Admin bisa mengubah dan menghapus semua item.
 
-Untuk menambah ke katalog, tempel link YouTube, isi judul, lalu pilih kategori. ID dan thumbnail video diambil otomatis. Admin dan dosen langsung menayangkan item. Mahasiswa mengusulkan item, lalu admin memilih **Setujui** atau **Tolak**. Usulan yang belum disetujui hanya terlihat oleh admin dan pengusulnya. Admin bisa menghapus semua item. Dosen dan mahasiswa hanya bisa menghapus item yang mereka tambahkan sendiri.
+Data disimpan di tabel `streaming_items`. Server membuat tabel itu saat start, atau lewat `npm --prefix api run db:migrate`. Saat tabel pertama kali dibuat, data lama disalin satu kali:
+- playlist YouTube profil setiap anggota menjadi item Pribadi;
+- playlist bawaan admin menjadi item Katalog Bersama;
+- isi Watch (`yplaylists`) menjadi item Katalog Bersama;
+- isi TV Live (`tvlive`) menjadi item Katalog Bersama dengan kategori Siaran Live.
 
-Hanya link YouTube dan Spotify yang diterima. Kode `<iframe>` lama tetap bisa diputar, karena hanya URL di dalamnya yang dipakai. Server menambahkan kolom `category`, `status`, dan `added_by_*` ke `yplaylists` dan `tvlive` saat start, atau lewat `npm --prefix api run db:migrate`. Item lama otomatis berstatus disetujui dengan kategori Lainnya.
+Input playlist di Profil dan Settings sudah dihapus. Hanya link YouTube dan Spotify yang diterima. Kode `<iframe>` lama tetap terbaca, karena hanya URL di dalamnya yang dipakai.

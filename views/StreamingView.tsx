@@ -1,11 +1,10 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import {
-  Youtube, Music, Radio, Play, AlertTriangle, Settings, X, Save, Loader2, HelpCircle,
-  Trash2, Zap, Plus, Monitor, Search, Check, Clock, Layers
+  Youtube, Music, Radio, Play, X, Save, Loader2, HelpCircle, Trash2, Plus, Search, Check, Clock, Pencil, Lock, Users
 } from 'lucide-react';
 import { UserProfile, AppAssets, UserRole } from '../types';
 import { api } from '../api';
-import { embedUrl, parseYoutube, youtubeThumbnail } from '../lib/streamingLinks';
+import { parseStreamingLink } from '../api/lib/streamingLinks.js';
 
 interface StreamingViewProps {
   profile: UserProfile;
@@ -16,364 +15,275 @@ interface StreamingViewProps {
   showConfirm: (title: string, message: string, onConfirm: () => void) => void;
 }
 
-type Tab = 'youtube' | 'spotify' | 'tvlive' | 'watch';
-type CatalogItem = {
-  key: string; kind: 'playlist' | 'tv'; title: string; thumbnail: string; category: string;
-  status: 'APPROVED' | 'PENDING'; addedByName: string; canDelete: boolean; embed: string;
+type Item = {
+  id: string; provider: 'YOUTUBE' | 'SPOTIFY'; kind: string; url: string; embedUrl: string; title: string; thumbnail: string;
+  category: string; visibility: 'PRIVATE' | 'SHARED'; status: 'APPROVED' | 'PENDING'; ownerName: string; mine: boolean; canEdit: boolean;
 };
+type Tab = 'mine' | 'shared';
+type Draft = { id?: string; link: string; title: string; category: string; visibility: 'PRIVATE' | 'SHARED' };
 
 export const streamingCategories: Record<string, string> = {
-  KULIAH: 'Materi Kuliah', WEBINAR: 'Webinar & Seminar', STARTUP: 'Startup & Bisnis', HIBURAN: 'Hiburan', LAINNYA: 'Lainnya'
+  EDUKASI: 'Edukasi', MUSIK: 'Musik', PODCAST: 'Podcast', HIBURAN: 'Hiburan', INSPIRASI: 'Inspirasi',
+  BISNIS: 'Startup & Bisnis', EVENT: 'Event & Webinar', LIVE: 'Siaran Live', LAINNYA: 'Lainnya'
 };
-
-const tabs: { id: Tab; label: string; icon: React.ElementType; active: string }[] = [
-  { id: 'youtube', label: 'YouTube Saya', icon: Youtube, active: 'bg-red-600' },
-  { id: 'spotify', label: 'Musik Saya', icon: Music, active: 'bg-emerald-600' },
-  { id: 'tvlive', label: 'TV Live', icon: Monitor, active: 'bg-indigo-600' },
-  { id: 'watch', label: 'Katalog Video', icon: Zap, active: 'bg-orange-600' }
-];
+const providers: Record<string, string> = { YOUTUBE: 'YouTube', SPOTIFY: 'Spotify' };
 
 const field = 'w-full px-5 py-4 bg-slate-50 rounded-2xl font-bold text-sm outline-none border border-slate-100 focus:border-orange-300 focus:ring-4 focus:ring-orange-100';
 const label = 'text-[10px] font-black text-slate-500 uppercase ml-2 tracking-widest';
+const chip = (on: boolean) => `px-4 py-2 rounded-xl text-xs font-black transition-all ${on ? 'bg-slate-900 text-white' : 'bg-white text-slate-600 border border-slate-200 hover:border-slate-400'}`;
 
-const StreamingView: React.FC<StreamingViewProps> = ({ profile, assets, setProfile, onShowAlert, onRefresh, showConfirm }) => {
-  const [activeTab, setActiveTab] = useState<Tab>('youtube');
-  const [showSettings, setShowSettings] = useState(false);
+const StreamingView: React.FC<StreamingViewProps> = ({ profile, onShowAlert, showConfirm }) => {
+  const [tab, setTab] = useState<Tab>('mine');
   const [showGuide, setShowGuide] = useState(false);
-  const [adding, setAdding] = useState<'playlist' | 'tv' | null>(null);
+  const [draft, setDraft] = useState<Draft | null>(null);
   const [isSaving, setIsSaving] = useState(false);
-  const [draftYoutube, setDraftYoutube] = useState(profile.youtube || '');
-  const [draftSpotify, setDraftSpotify] = useState(profile.spotify || '');
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState('');
-  const [playing, setPlaying] = useState<CatalogItem | null>(null);
-  const [catalog, setCatalog] = useState<CatalogItem[] | null>(null);
-  const [link, setLink] = useState('');
+  const [provider, setProvider] = useState('');
+  const [playing, setPlaying] = useState<Item | null>(null);
+  const [items, setItems] = useState<Item[] | null>(null);
 
   const isAdmin = profile.role === UserRole.ADMIN;
   const isStudent = profile.role === UserRole.STUDENT;
-  const ytEmbed = embedUrl(profile.youtube || assets.adminYoutube);
-  const spEmbed = embedUrl(profile.spotify || assets.adminSpotify);
-  const isFallback = activeTab === 'youtube' ? (!profile.youtube && !!assets.adminYoutube) : activeTab === 'spotify' ? (!profile.spotify && !!assets.adminSpotify) : false;
-  const catalogTab = activeTab === 'watch' || activeTab === 'tvlive';
-  const kind = activeTab === 'watch' ? 'playlist' : 'tv';
 
-  const loadCatalog = useCallback(async () => {
-    const res = await api.postData('getStreamingCatalog', {});
-    if (res?.status !== 'success') return setCatalog([]);
-    setCatalog([
-      ...res.playlists.map((p: any) => ({ ...p, key: p.playlistId, kind: 'playlist', embed: `https://www.youtube.com/embed/videoseries?list=${p.playlistId}` })),
-      ...res.tv.map((t: any) => ({ ...t, key: t.id, kind: 'tv', embed: `https://www.youtube.com/embed/${t.videoId}?autoplay=1` }))
-    ]);
+  const load = useCallback(async () => {
+    const res = await api.postData('getStreamingItems', {});
+    setItems(res?.status === 'success' ? res.items : []);
   }, []);
-  useEffect(() => { loadCatalog(); }, [loadCatalog]);
+  useEffect(() => { load(); }, [load]);
 
-  const items = useMemo(() => (catalog ?? []).filter(item => item.kind === kind), [catalog, kind]);
-  const pending = items.filter(item => item.status === 'PENDING');
-  const shown = items.filter(item => item.status === 'APPROVED'
-    && (!category || item.category === category)
+  const inTab = useMemo(() => (items ?? []).filter(item => tab === 'mine' ? item.mine : item.visibility === 'SHARED'), [items, tab]);
+  const pending = tab === 'shared' ? inTab.filter(item => item.status === 'PENDING') : [];
+  const shown = inTab.filter(item => (tab === 'mine' || item.status === 'APPROVED')
+    && (!category || item.category === category) && (!provider || item.provider === provider)
     && item.title.toLowerCase().includes(search.toLowerCase()));
 
-  const switchTab = (tab: Tab) => { setActiveTab(tab); setPlaying(null); setSearch(''); setCategory(''); };
+  const switchTab = (next: Tab) => { setTab(next); setPlaying(null); setSearch(''); setCategory(''); setProvider(''); };
 
-  const settingsError = (value: string, name: string) => value.trim() && !embedUrl(value) ? `Link ${name} tidak dikenali. Tempel link dari YouTube atau Spotify.` : '';
-  const ytError = settingsError(draftYoutube, 'YouTube');
-  const spError = settingsError(draftSpotify, 'Spotify');
+  const parsed = draft ? parseStreamingLink(draft.link) : null;
+  const linkError = draft?.link.trim() && !parsed ? 'Link tidak dikenali. Tempel link dari YouTube (video, playlist, live) atau Spotify (playlist, album, lagu, podcast).' : '';
 
-  const handleSaveSettings = async () => {
-    if (ytError || spError) return;
-    setIsSaving(true);
-    const updatedProfile = { ...profile, youtube: draftYoutube.trim(), spotify: draftSpotify.trim() };
-    const res = await api.postData('updateProfile', updatedProfile);
-    if (res?.status === 'success') {
-      setProfile(updatedProfile);
-      onShowAlert('Tersimpan', 'Playlist pribadi Anda diperbarui.', 'success');
-      setShowSettings(false);
-      onRefresh();
-    }
-    setIsSaving(false);
-  };
-
-  const parsed = parseYoutube(link);
-  const linkError = !link.trim() ? '' : !parsed ? 'Link YouTube tidak dikenali.'
-    : adding === 'playlist' && !parsed.playlistId ? 'Link ini bukan playlist. Buka playlist di YouTube lalu salin link dari address bar.'
-    : adding === 'tv' && !parsed.videoId ? 'Link ini bukan video. Salin link video atau siaran live-nya.' : '';
-  const previewThumb = parsed?.videoId ? youtubeThumbnail(parsed.videoId) : '';
-
-  const handleAdd = async (e: React.FormEvent<HTMLFormElement>) => {
+  const save = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!parsed || linkError) return;
+    if (!draft || !parsed) return;
     setIsSaving(true);
-    const fd = new FormData(e.currentTarget);
-    const common = { title: String(fd.get('title') || ''), category: String(fd.get('category') || 'LAINNYA'), thumbnail: previewThumb };
-    const res = adding === 'playlist'
-      ? await api.postData('manageYPlaylist', { type: 'add', data: { ...common, playlistId: parsed.playlistId, channelTitle: String(fd.get('channelTitle') || '') } })
-      : await api.postData('manageTvLive', { type: 'add', data: { ...common, videoId: parsed.videoId } });
+    const data = { link: draft.link, title: draft.title, category: draft.category, visibility: draft.visibility };
+    const res = await api.postData('manageStreamingItem', draft.id ? { type: 'edit', id: draft.id, data } : { type: 'add', data });
     if (res?.status === 'success') {
-      onShowAlert(res.itemStatus === 'PENDING' ? 'Usulan terkirim' : 'Ditambahkan',
-        res.itemStatus === 'PENDING' ? 'Item akan tampil setelah disetujui admin.' : 'Item sudah tampil di katalog.', 'success');
-      setAdding(null);
-      setLink('');
-      loadCatalog();
-      onRefresh();
+      onShowAlert(res.itemStatus === 'PENDING' ? 'Menunggu persetujuan' : 'Tersimpan',
+        res.itemStatus === 'PENDING' ? 'Item tersimpan di koleksi Anda dan tampil di katalog setelah disetujui admin.' : 'Item tersimpan.', 'success');
+      setDraft(null);
+      load();
     }
     setIsSaving(false);
   };
 
-  const act = async (item: CatalogItem, type: 'delete' | 'approve') => {
-    const res = await api.postData(item.kind === 'playlist' ? 'manageYPlaylist' : 'manageTvLive', { type, id: item.key });
+  const act = async (item: Item, type: 'delete' | 'approve') => {
+    const res = await api.postData('manageStreamingItem', { type, id: item.id });
     if (res?.status === 'success') {
-      onShowAlert(type === 'approve' ? 'Disetujui' : 'Dihapus', type === 'approve' ? `"${item.title}" sekarang tampil di katalog.` : `"${item.title}" dihapus.`, 'success');
-      if (playing?.key === item.key) setPlaying(null);
-      loadCatalog();
-      onRefresh();
+      onShowAlert(type === 'approve' ? 'Disetujui' : 'Dihapus', `"${item.title}" ${type === 'approve' ? 'sekarang tampil di katalog' : 'dihapus'}.`, 'success');
+      if (playing?.id === item.id) setPlaying(null);
+      load();
     }
   };
-  const remove = (item: CatalogItem) => showConfirm(item.status === 'PENDING' && isAdmin ? 'Tolak usulan?' : 'Hapus item?',
-    `"${item.title}" akan dihapus dari katalog.`, () => act(item, 'delete'));
+  const remove = (item: Item) => showConfirm(item.status === 'PENDING' && isAdmin && !item.mine ? 'Tolak usulan?' : 'Hapus item?',
+    `"${item.title}" akan dihapus.`, () => act(item, 'delete'));
+  const edit = (item: Item) => setDraft({ id: item.id, link: item.url, title: item.title, category: item.category, visibility: item.visibility });
+  const create = () => setDraft({ link: '', title: '', category: 'LAINNYA', visibility: tab === 'shared' ? 'SHARED' : 'PRIVATE' });
 
-  const thumb = (item: CatalogItem) => item.thumbnail
-    ? <img src={item.thumbnail} className="w-full h-full object-cover" alt="" loading="lazy" />
-    : <div className="w-full h-full grid place-items-center bg-gradient-to-br from-slate-800 to-slate-950"><Layers size={36} className="text-white/40" /></div>;
+  const badge = (item: Item) => {
+    if (item.status === 'PENDING') return <span className="inline-flex items-center gap-1 rounded-md bg-amber-100 px-2 py-0.5 font-bold text-amber-800"><Clock size={11} /> Menunggu persetujuan</span>;
+    if (tab === 'mine') return item.visibility === 'SHARED'
+      ? <span className="inline-flex items-center gap-1 rounded-md bg-emerald-50 px-2 py-0.5 font-bold text-emerald-700"><Users size={11} /> Dibagikan</span>
+      : <span className="inline-flex items-center gap-1 rounded-md bg-slate-100 px-2 py-0.5 font-bold text-slate-600"><Lock size={11} /> Pribadi</span>;
+    return null;
+  };
 
-  const card = (item: CatalogItem) => (
-    <li key={item.key} className="bg-white rounded-[2rem] border border-slate-100 overflow-hidden shadow-sm flex flex-col">
-      <button type="button" onClick={() => setPlaying(item)} className="group text-left focus:outline-none focus:ring-4 focus:ring-orange-200 rounded-t-[2rem]" aria-label={`Putar ${item.title}`}>
-        <div className="relative aspect-video bg-slate-900 overflow-hidden">
-          {thumb(item)}
+  const card = (item: Item) => (
+    <li key={item.id} className="bg-white rounded-[2rem] border border-slate-100 overflow-hidden shadow-sm flex flex-col">
+      <button type="button" onClick={() => setPlaying(item)} aria-label={`Putar ${item.title}`}
+        className="group text-left focus:outline-none focus:ring-4 focus:ring-orange-200 rounded-t-[2rem]">
+        <div className="relative aspect-video overflow-hidden">
+          {item.thumbnail
+            ? <img src={item.thumbnail} className="w-full h-full object-cover" alt="" loading="lazy" />
+            : <div className={`w-full h-full grid place-items-center bg-gradient-to-br ${item.provider === 'SPOTIFY' ? 'from-emerald-500 to-emerald-900' : 'from-red-500 to-red-900'}`}>
+                {item.provider === 'SPOTIFY' ? <Music size={40} className="text-white/80" /> : <Youtube size={40} className="text-white/80" />}
+              </div>}
           <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 group-focus:opacity-100 transition-opacity grid place-items-center"><Play size={44} className="text-white fill-white" /></div>
-          {item.kind === 'tv' && <span className="absolute top-4 left-4 px-3 py-1 bg-red-600 text-white text-[9px] font-black uppercase rounded-lg">Live</span>}
+          <span className={`absolute top-3 left-3 px-2.5 py-1 text-white text-[9px] font-black uppercase rounded-lg ${item.provider === 'SPOTIFY' ? 'bg-emerald-600' : 'bg-red-600'}`}>{providers[item.provider]}</span>
         </div>
         <div className="p-5 pb-2 font-black text-slate-900 line-clamp-2 text-sm leading-snug">{item.title}</div>
       </button>
       <div className="px-5 pb-5 mt-auto flex items-end justify-between gap-2">
-        <div className="min-w-0 text-[11px] text-slate-500">
-          <span className="inline-block rounded-md bg-slate-100 px-2 py-0.5 font-bold text-slate-700">{streamingCategories[item.category] ?? 'Lainnya'}</span>
-          {item.addedByName && <span className="block truncate mt-1">Oleh {item.addedByName}</span>}
+        <div className="min-w-0 text-[11px] text-slate-500 space-y-1">
+          <div className="flex flex-wrap gap-1">
+            <span className="inline-block rounded-md bg-slate-100 px-2 py-0.5 font-bold text-slate-700">{streamingCategories[item.category] ?? 'Lainnya'}</span>
+            {badge(item)}
+          </div>
+          {tab === 'shared' && item.ownerName && <span className="block truncate">Dibagikan oleh {item.ownerName}</span>}
         </div>
-        {item.canDelete && (
-          <button type="button" onClick={() => remove(item)} aria-label={`Hapus ${item.title}`}
-            className="shrink-0 p-2.5 rounded-xl bg-red-50 text-red-600 hover:bg-red-100 focus:outline-none focus:ring-2 focus:ring-red-300"><Trash2 size={16} /></button>
+        {item.canEdit && (
+          <div className="flex shrink-0 gap-1.5">
+            <button type="button" onClick={() => edit(item)} aria-label={`Ubah ${item.title}`}
+              className="p-2.5 rounded-xl bg-slate-100 text-slate-700 hover:bg-slate-200 focus:outline-none focus:ring-2 focus:ring-slate-300"><Pencil size={15} /></button>
+            <button type="button" onClick={() => remove(item)} aria-label={`Hapus ${item.title}`}
+              className="p-2.5 rounded-xl bg-red-50 text-red-600 hover:bg-red-100 focus:outline-none focus:ring-2 focus:ring-red-300"><Trash2 size={15} /></button>
+          </div>
         )}
       </div>
     </li>
   );
 
-  const empty = (icon: React.ElementType, text: string, action?: React.ReactNode) => {
-    const Icon = icon;
-    return (
-      <div className="absolute inset-0 flex flex-col items-center justify-center text-center p-10 gap-4 bg-slate-50">
-        <Icon size={40} className="text-slate-300" />
-        <p className="text-sm font-bold text-slate-500 max-w-sm">{text}</p>
-        {action}
-      </div>
-    );
-  };
-
-  const openSettings = () => { setDraftYoutube(profile.youtube || ''); setDraftSpotify(profile.spotify || ''); setShowSettings(true); };
-
   return (
-    <div className="space-y-6 lg:space-y-8 animate-in fade-in duration-700 pb-10 min-h-[calc(100vh-160px)] flex flex-col font-['Plus_Jakarta_Sans']">
-      <div className="flex flex-col gap-6 shrink-0">
-        <div className="flex items-center justify-between w-full gap-3">
-          <div className="min-w-0">
-            <h2 className="text-2xl lg:text-5xl font-black text-slate-900 tracking-tighter leading-none truncate">Streaming Hub</h2>
-            <p className="text-slate-500 font-bold text-[10px] lg:text-xs uppercase tracking-[0.2em] mt-2 flex items-center gap-2">
-              <Radio size={12} className="text-orange-600" /> Video, musik, dan siaran untuk belajar bersama
-            </p>
-          </div>
-          <div className="flex items-center gap-2 shrink-0">
-            <button type="button" onClick={() => setShowGuide(!showGuide)} aria-expanded={showGuide} aria-label="Panduan Streaming Hub"
-              className={`p-2.5 lg:p-3 rounded-xl shadow-sm transition-all border ${showGuide ? 'bg-orange-600 border-orange-600 text-white' : 'bg-white border-slate-100 text-slate-500 hover:text-orange-600'}`}>
-              <HelpCircle size={20} />
-            </button>
-            <button type="button" onClick={openSettings} aria-label="Atur playlist pribadi"
-              className="p-2.5 lg:p-3 bg-white border border-slate-100 text-slate-500 hover:text-orange-600 rounded-xl shadow-sm transition-all">
-              <Settings size={20} />
-            </button>
-            {catalogTab && (
-              <button type="button" onClick={() => { setLink(''); setAdding(kind); }}
-                className="p-2.5 lg:p-3 bg-slate-900 text-white rounded-xl shadow-lg hover:bg-black transition-all flex items-center gap-2">
-                <Plus size={20} />
-                <span className="hidden sm:inline text-[10px] font-black uppercase tracking-widest">{isStudent ? 'Usulkan' : 'Tambah'}</span>
-              </button>
-            )}
-          </div>
+    <div className="space-y-6 lg:space-y-8 animate-in fade-in duration-700 pb-10 font-['Plus_Jakarta_Sans']">
+      <div className="flex items-center justify-between w-full gap-3">
+        <div className="min-w-0">
+          <h2 className="text-2xl lg:text-5xl font-black text-slate-900 tracking-tighter leading-none truncate">Streaming Hub</h2>
+          <p className="text-slate-500 font-bold text-[10px] lg:text-xs uppercase tracking-[0.2em] mt-2 flex items-center gap-2">
+            <Radio size={12} className="text-orange-600" /> Simpan dan bagikan video, musik, dan podcast favorit
+          </p>
         </div>
-
-        {showGuide && (
-          <section aria-label="Panduan" className="rounded-[2rem] border border-orange-100 bg-orange-50/60 p-6 lg:p-8 text-sm text-slate-700 space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="font-black text-slate-900 text-lg">Cara memakai Streaming Hub</h3>
-              <button type="button" onClick={() => setShowGuide(false)} aria-label="Tutup panduan" className="p-2 rounded-xl text-slate-500 hover:bg-white"><X size={18} /></button>
-            </div>
-            <ul className="grid gap-3 md:grid-cols-2">
-              <li><b>YouTube Saya & Musik Saya</b> — putar playlist pribadi saat bekerja. Klik ikon ⚙, tempel link playlist YouTube atau Spotify, lalu simpan. Hanya Anda yang melihatnya. Jika kosong, playlist bawaan admin yang diputar.</li>
-              <li><b>Katalog Video</b> — kumpulan playlist YouTube untuk semua anggota, misalnya materi kuliah, rekaman webinar, atau materi startup. Pilih kategori atau cari judul, lalu klik untuk memutar.</li>
-              <li><b>TV Live</b> — siaran langsung YouTube, misalnya kanal berita atau live event kampus.</li>
-              <li><b>Menambah ke katalog</b> — klik <b>{isStudent ? 'Usulkan' : 'Tambah'}</b>, tempel link dari YouTube, isi judul dan kategori. {isStudent
-                ? 'Usulan mahasiswa tampil setelah disetujui admin.'
-                : 'Item dosen dan admin langsung tampil.'} Anda bisa menghapus item yang Anda tambahkan sendiri.</li>
-            </ul>
-          </section>
-        )}
-
-        <div role="tablist" aria-label="Bagian Streaming Hub" className="flex bg-slate-100/50 p-1.5 rounded-2xl shadow-inner border border-slate-200/50 w-full overflow-x-auto scrollbar-hide">
-          {tabs.map(({ id, label: text, icon: Icon, active }) => (
-            <button key={id} type="button" role="tab" aria-selected={activeTab === id} onClick={() => switchTab(id)}
-              className={`flex-1 min-w-[95px] px-3 py-3 rounded-xl font-black text-[9px] lg:text-[10px] uppercase tracking-widest flex items-center justify-center gap-2 transition-all ${activeTab === id ? active + ' text-white shadow-lg' : 'text-slate-500 hover:text-slate-700'}`}>
-              <Icon size={14} /> <span>{text}</span>
-            </button>
-          ))}
+        <div className="flex items-center gap-2 shrink-0">
+          <button type="button" onClick={() => setShowGuide(!showGuide)} aria-expanded={showGuide} aria-label="Panduan Streaming Hub"
+            className={`p-2.5 lg:p-3 rounded-xl shadow-sm transition-all border ${showGuide ? 'bg-orange-600 border-orange-600 text-white' : 'bg-white border-slate-100 text-slate-500 hover:text-orange-600'}`}>
+            <HelpCircle size={20} />
+          </button>
+          <button type="button" onClick={create} className="p-2.5 lg:p-3 bg-slate-900 text-white rounded-xl shadow-lg hover:bg-black transition-all flex items-center gap-2">
+            <Plus size={20} /><span className="hidden sm:inline text-[10px] font-black uppercase tracking-widest">Tambah</span>
+          </button>
         </div>
       </div>
 
-      <div className="flex-1 flex flex-col space-y-4 relative min-w-0 min-h-0">
-        {isFallback && (
-          <div className="bg-amber-50 border border-amber-100 p-4 rounded-2xl flex items-center gap-3 shrink-0">
-            <AlertTriangle size={14} className="text-amber-500 shrink-0" />
-            <p className="text-xs font-bold text-amber-800">Anda sedang memutar playlist bawaan admin. Klik ikon ⚙ untuk memakai playlist Anda sendiri.</p>
+      {showGuide && (
+        <section aria-label="Panduan" className="rounded-[2rem] border border-orange-100 bg-orange-50/60 p-6 lg:p-8 text-sm text-slate-700 space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="font-black text-slate-900 text-lg">Cara memakai Streaming Hub</h3>
+            <button type="button" onClick={() => setShowGuide(false)} aria-label="Tutup panduan" className="p-2 rounded-xl text-slate-500 hover:bg-white"><X size={18} /></button>
           </div>
-        )}
-
-        {catalogTab && pending.length > 0 && !playing && (
-          <section aria-label="Menunggu persetujuan" className="rounded-[2rem] border border-amber-200 bg-amber-50 p-5 lg:p-6">
-            <h3 className="flex items-center gap-2 font-black text-amber-900 mb-3"><Clock size={16} /> {isAdmin ? 'Usulan menunggu persetujuan' : 'Usulan Anda menunggu persetujuan admin'}</h3>
-            <ul className="divide-y divide-amber-200">
-              {pending.map(item => (
-                <li key={item.key} className="flex flex-wrap items-center justify-between gap-3 py-3">
-                  <div className="min-w-0 text-sm">
-                    <span className="font-bold text-slate-900 block truncate">{item.title}</span>
-                    <span className="text-slate-600">{streamingCategories[item.category] ?? 'Lainnya'}{item.addedByName && ` · oleh ${item.addedByName}`}</span>
-                  </div>
-                  <div className="flex gap-2">
-                    <button type="button" onClick={() => setPlaying(item)} className="px-3 py-2 rounded-xl bg-white text-xs font-black text-slate-700 border border-amber-200">Pratinjau</button>
-                    {isAdmin && <button type="button" onClick={() => act(item, 'approve')} className="px-3 py-2 rounded-xl bg-emerald-600 text-white text-xs font-black flex items-center gap-1"><Check size={14} /> Setujui</button>}
-                    {item.canDelete && <button type="button" onClick={() => remove(item)} className="px-3 py-2 rounded-xl bg-red-600 text-white text-xs font-black">{isAdmin ? 'Tolak' : 'Batalkan'}</button>}
-                  </div>
-                </li>
-              ))}
-            </ul>
-          </section>
-        )}
-
-        <div className="w-full bg-black shadow-2xl relative rounded-[2rem] border border-slate-900 overflow-hidden flex flex-col flex-1 min-h-[500px] lg:min-h-[70vh]">
-          {playing ? (
-            <>
-              <iframe src={playing.embed} title={playing.title} referrerPolicy="strict-origin-when-cross-origin"
-                className="absolute inset-0 w-full h-full border-none bg-black"
-                allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture" allowFullScreen />
-              <button type="button" onClick={() => setPlaying(null)} aria-label="Tutup pemutar dan kembali ke katalog"
-                className="absolute top-6 right-6 p-3 bg-white/20 hover:bg-white/40 backdrop-blur-md text-white rounded-full z-20 border border-white/10">
-                <X size={22} />
-              </button>
-            </>
-          ) : activeTab === 'youtube' || activeTab === 'spotify' ? (
-            (activeTab === 'youtube' ? ytEmbed : spEmbed) ? (
-              <iframe src={(activeTab === 'youtube' ? ytEmbed : spEmbed)!} title={activeTab === 'youtube' ? 'Pemutar YouTube' : 'Pemutar Spotify'}
-                referrerPolicy="strict-origin-when-cross-origin" className="absolute inset-0 w-full h-full border-none bg-black"
-                allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture" loading="lazy" allowFullScreen />
-            ) : empty(activeTab === 'youtube' ? Play : Music,
-              `Belum ada playlist ${activeTab === 'youtube' ? 'YouTube' : 'Spotify'}. Tempel link playlist Anda di pengaturan.`,
-              <button type="button" onClick={openSettings} className="px-5 py-3 rounded-xl bg-slate-900 text-white text-xs font-black uppercase tracking-widest">Atur playlist</button>)
-          ) : (
-            <div className="absolute inset-0 bg-slate-50 overflow-y-auto p-5 lg:p-8 space-y-5">
-              <label className="relative block">
-                <span className="sr-only">Cari judul</span>
-                <Search size={18} className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-400" />
-                <input type="search" placeholder={activeTab === 'watch' ? 'Cari playlist…' : 'Cari siaran…'} value={search} onChange={e => setSearch(e.target.value)}
-                  className="w-full pl-12 pr-5 py-4 bg-white rounded-2xl outline-none font-bold text-sm shadow-sm focus:ring-4 focus:ring-orange-100" />
-              </label>
-              <div className="flex flex-wrap gap-2" role="group" aria-label="Filter kategori">
-                {[['', 'Semua'], ...Object.entries(streamingCategories)].map(([id, text]) => (
-                  <button key={id || 'all'} type="button" aria-pressed={category === id} onClick={() => setCategory(id)}
-                    className={`px-4 py-2 rounded-xl text-xs font-black transition-all ${category === id ? 'bg-slate-900 text-white' : 'bg-white text-slate-600 border border-slate-200 hover:border-slate-400'}`}>{text}</button>
-                ))}
-              </div>
-              {catalog === null ? (
-                <p role="status" className="text-sm text-slate-500 flex items-center gap-2"><Loader2 size={16} className="animate-spin" /> Memuat katalog…</p>
-              ) : shown.length === 0 ? (
-                <p className="text-sm text-slate-500 py-10 text-center">{items.some(item => item.status === 'APPROVED')
-                  ? 'Tidak ada yang cocok dengan pencarian atau kategori ini.'
-                  : `Katalog masih kosong. Klik ${isStudent ? 'Usulkan' : 'Tambah'} untuk mengisi.`}</p>
-              ) : (
-                <ul className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">{shown.map(card)}</ul>
-              )}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {showSettings && (
-        <div role="dialog" aria-modal="true" aria-label="Playlist pribadi" className="fixed inset-0 z-[150] bg-slate-900/60 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="bg-white w-full max-w-2xl rounded-[2.5rem] shadow-2xl p-7 lg:p-10 max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between mb-6">
-              <h3 className="text-2xl font-black text-slate-900 tracking-tighter">Playlist pribadi</h3>
-              <button type="button" onClick={() => setShowSettings(false)} aria-label="Tutup" className="p-3 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-2xl"><X size={22} /></button>
-            </div>
-            <p className="text-sm text-slate-600 mb-6">Tempel link playlist atau video dari YouTube, dan link playlist, album, atau podcast dari Spotify. Kosongkan untuk memakai playlist bawaan admin.</p>
-            <div className="space-y-6">
-              <label className="block space-y-2">
-                <span className={label + ' flex items-center gap-2'}><Youtube size={14} className="text-red-600" /> Link YouTube</span>
-                <input value={draftYoutube} onChange={e => setDraftYoutube(e.target.value)} placeholder="https://www.youtube.com/playlist?list=…" className={field} aria-invalid={!!ytError} />
-                {ytError && <span role="alert" className="block text-xs font-bold text-red-600 ml-2">{ytError}</span>}
-              </label>
-              <label className="block space-y-2">
-                <span className={label + ' flex items-center gap-2'}><Music size={14} className="text-emerald-600" /> Link Spotify</span>
-                <input value={draftSpotify} onChange={e => setDraftSpotify(e.target.value)} placeholder="https://open.spotify.com/playlist/…" className={field} aria-invalid={!!spError} />
-                {spError && <span role="alert" className="block text-xs font-bold text-red-600 ml-2">{spError}</span>}
-              </label>
-              <div className="flex gap-3 pt-2">
-                <button type="button" onClick={() => setShowSettings(false)} className="flex-1 py-4 bg-slate-50 text-slate-500 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-slate-100">Batal</button>
-                <button type="button" onClick={handleSaveSettings} disabled={isSaving || !!ytError || !!spError}
-                  className="flex-1 py-4 bg-slate-900 text-white rounded-2xl font-black text-xs uppercase tracking-widest flex items-center justify-center gap-2 hover:bg-black disabled:opacity-50">
-                  {isSaving ? <Loader2 size={18} className="animate-spin" /> : <Save size={18} />} Simpan
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+          <ul className="grid gap-3 md:grid-cols-2">
+            <li><b>Tambah</b> — tempel link YouTube (video, playlist, atau live) atau Spotify (playlist, album, lagu, atau podcast). Beri judul dan kategori. Jumlahnya tidak dibatasi satu.</li>
+            <li><b>Koleksi Saya</b> — semua item yang Anda simpan. Item <b>Pribadi</b> hanya terlihat oleh Anda.</li>
+            <li><b>Katalog Bersama</b> — item yang dibagikan anggota: musik kerja, podcast, rekaman acara, materi, hiburan, dan apa saja yang bermanfaat. Saring dengan platform atau kategori.</li>
+            <li><b>Membagikan</b> — pilih <b>Bagikan ke Katalog Bersama</b> saat menambah atau mengubah item. {isStudent
+              ? 'Item mahasiswa tampil di katalog setelah disetujui admin.'
+              : 'Item dosen dan admin langsung tampil.'} Anda bisa mengubah atau menghapus item milik Anda kapan saja.</li>
+          </ul>
+        </section>
       )}
 
-      {adding && (
-        <div role="dialog" aria-modal="true" aria-label={adding === 'playlist' ? 'Tambah playlist' : 'Tambah siaran'} className="fixed inset-0 z-[160] bg-slate-900/60 backdrop-blur-md flex items-center justify-center p-4">
+      <div role="tablist" aria-label="Bagian Streaming Hub" className="flex bg-slate-100/50 p-1.5 rounded-2xl shadow-inner border border-slate-200/50 w-full">
+        {([['mine', 'Koleksi Saya', Lock], ['shared', 'Katalog Bersama', Users]] as const).map(([id, text, Icon]) => (
+          <button key={id} type="button" role="tab" aria-selected={tab === id} onClick={() => switchTab(id)}
+            className={`flex-1 px-3 py-3 rounded-xl font-black text-[10px] lg:text-xs uppercase tracking-widest flex items-center justify-center gap-2 transition-all ${tab === id ? 'bg-orange-600 text-white shadow-lg' : 'text-slate-500 hover:text-slate-700'}`}>
+            <Icon size={14} /> {text}
+          </button>
+        ))}
+      </div>
+
+      {pending.length > 0 && !playing && (
+        <section aria-label="Menunggu persetujuan" className="rounded-[2rem] border border-amber-200 bg-amber-50 p-5 lg:p-6">
+          <h3 className="flex items-center gap-2 font-black text-amber-900 mb-3"><Clock size={16} /> Usulan menunggu persetujuan</h3>
+          <ul className="divide-y divide-amber-200">
+            {pending.map(item => (
+              <li key={item.id} className="flex flex-wrap items-center justify-between gap-3 py-3">
+                <div className="min-w-0 text-sm">
+                  <span className="font-bold text-slate-900 block truncate">{item.title}</span>
+                  <span className="text-slate-600">{providers[item.provider]} · {streamingCategories[item.category] ?? 'Lainnya'}{item.ownerName && ` · oleh ${item.ownerName}`}</span>
+                </div>
+                <div className="flex gap-2">
+                  <button type="button" onClick={() => setPlaying(item)} className="px-3 py-2 rounded-xl bg-white text-xs font-black text-slate-700 border border-amber-200">Pratinjau</button>
+                  {isAdmin && <button type="button" onClick={() => act(item, 'approve')} className="px-3 py-2 rounded-xl bg-emerald-600 text-white text-xs font-black flex items-center gap-1"><Check size={14} /> Setujui</button>}
+                  {item.canEdit && <button type="button" onClick={() => remove(item)} className="px-3 py-2 rounded-xl bg-red-600 text-white text-xs font-black">{isAdmin && !item.mine ? 'Tolak' : 'Batalkan'}</button>}
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {playing ? (
+        <section aria-label={`Memutar ${playing.title}`} className="space-y-3">
+          <div className="flex items-center justify-between gap-3">
+            <h3 className="font-black text-slate-900 truncate">{playing.title}</h3>
+            <button type="button" onClick={() => setPlaying(null)} className="shrink-0 px-4 py-2 rounded-xl bg-slate-900 text-white text-xs font-black flex items-center gap-2"><X size={14} /> Tutup pemutar</button>
+          </div>
+          <div className={`relative w-full overflow-hidden rounded-[2rem] bg-black shadow-2xl ${playing.provider === 'SPOTIFY' ? 'h-[480px]' : 'aspect-video'}`}>
+            <iframe src={playing.embedUrl} title={playing.title} referrerPolicy="strict-origin-when-cross-origin"
+              className="absolute inset-0 w-full h-full border-none" allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture" allowFullScreen />
+          </div>
+        </section>
+      ) : (
+        <section className="space-y-5">
+          <label className="relative block">
+            <span className="sr-only">Cari judul</span>
+            <Search size={18} className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input type="search" placeholder="Cari judul…" value={search} onChange={e => setSearch(e.target.value)}
+              className="w-full pl-12 pr-5 py-4 bg-white rounded-2xl outline-none font-bold text-sm shadow-sm border border-slate-100 focus:ring-4 focus:ring-orange-100" />
+          </label>
+          <div className="flex flex-wrap gap-2" role="group" aria-label="Filter platform">
+            {[['', 'Semua platform'], ...Object.entries(providers)].map(([id, text]) => (
+              <button key={id || 'all'} type="button" aria-pressed={provider === id} onClick={() => setProvider(id)} className={chip(provider === id)}>{text}</button>
+            ))}
+          </div>
+          <div className="flex flex-wrap gap-2" role="group" aria-label="Filter kategori">
+            {[['', 'Semua kategori'], ...Object.entries(streamingCategories)].map(([id, text]) => (
+              <button key={id || 'all'} type="button" aria-pressed={category === id} onClick={() => setCategory(id)} className={chip(category === id)}>{text}</button>
+            ))}
+          </div>
+          {items === null ? (
+            <p role="status" className="text-sm text-slate-500 flex items-center gap-2"><Loader2 size={16} className="animate-spin" /> Memuat…</p>
+          ) : shown.length === 0 ? (
+            <div className="rounded-[2rem] border border-dashed border-slate-200 bg-white p-10 text-center space-y-4">
+              <p className="text-sm font-bold text-slate-500">{inTab.length
+                ? 'Tidak ada yang cocok dengan pencarian atau filter ini.'
+                : tab === 'mine' ? 'Koleksi Anda masih kosong. Tambahkan video, playlist, atau podcast favorit Anda.' : 'Belum ada yang dibagikan. Jadilah yang pertama.'}</p>
+              {!inTab.length && <button type="button" onClick={create} className="px-5 py-3 rounded-xl bg-slate-900 text-white text-xs font-black uppercase tracking-widest">Tambah</button>}
+            </div>
+          ) : (
+            <ul className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">{shown.map(card)}</ul>
+          )}
+        </section>
+      )}
+
+      {draft && (
+        <div role="dialog" aria-modal="true" aria-label={draft.id ? 'Ubah item' : 'Tambah item'} className="fixed inset-0 z-[160] bg-slate-900/60 backdrop-blur-md flex items-center justify-center p-4">
           <div className="bg-white w-full max-w-xl rounded-[2.5rem] shadow-2xl p-7 lg:p-10 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between mb-6">
-              <h3 className="text-2xl font-black text-slate-900 tracking-tighter">
-                {isStudent ? 'Usulkan' : 'Tambah'} {adding === 'playlist' ? 'playlist' : 'siaran live'}
-              </h3>
-              <button type="button" onClick={() => setAdding(null)} aria-label="Tutup" className="p-3 text-slate-400 hover:text-red-500"><X size={22} /></button>
+              <h3 className="text-2xl font-black text-slate-900 tracking-tighter">{draft.id ? 'Ubah item' : 'Tambah item'}</h3>
+              <button type="button" onClick={() => setDraft(null)} aria-label="Tutup" className="p-3 text-slate-400 hover:text-red-500"><X size={22} /></button>
             </div>
-            <form onSubmit={handleAdd} className="space-y-5">
+            <form onSubmit={save} className="space-y-5">
               <label className="block space-y-1.5">
-                <span className={label}>Link YouTube</span>
-                <input value={link} onChange={e => setLink(e.target.value)} required autoFocus aria-invalid={!!linkError}
-                  placeholder={adding === 'playlist' ? 'https://www.youtube.com/playlist?list=…' : 'https://www.youtube.com/watch?v=…'} className={field} />
-                {linkError && <span role="alert" className="block text-xs font-bold text-red-600 ml-2">{linkError}</span>}
+                <span className={label}>Link YouTube atau Spotify</span>
+                <input value={draft.link} onChange={e => setDraft({ ...draft, link: e.target.value })} required autoFocus aria-invalid={!!linkError}
+                  placeholder="https://www.youtube.com/… atau https://open.spotify.com/…" className={field} />
+                {linkError
+                  ? <span role="alert" className="block text-xs font-bold text-red-600 ml-2">{linkError}</span>
+                  : parsed && <span className="block text-xs font-bold text-emerald-700 ml-2">{providers[parsed.provider]} {parsed.kind} terdeteksi.</span>}
               </label>
-              {previewThumb && !linkError && <img src={previewThumb} alt="Pratinjau thumbnail" className="w-full aspect-video object-cover rounded-2xl" />}
+              {parsed?.thumbnail && <img src={parsed.thumbnail} alt="Pratinjau thumbnail" className="w-full aspect-video object-cover rounded-2xl" />}
               <label className="block space-y-1.5">
                 <span className={label}>Judul</span>
-                <input name="title" required maxLength={255} placeholder="Contoh: Pemrograman Web — Pertemuan 1" className={field} />
+                <input value={draft.title} onChange={e => setDraft({ ...draft, title: e.target.value })} required maxLength={255} placeholder="Contoh: Lo-fi untuk fokus kerja" className={field} />
               </label>
               <label className="block space-y-1.5">
                 <span className={label}>Kategori</span>
-                <select name="category" defaultValue={adding === 'playlist' ? 'KULIAH' : 'LAINNYA'} className={field}>
+                <select value={draft.category} onChange={e => setDraft({ ...draft, category: e.target.value })} className={field}>
                   {Object.entries(streamingCategories).map(([id, text]) => <option key={id} value={id}>{text}</option>)}
                 </select>
               </label>
-              {adding === 'playlist' && (
-                <label className="block space-y-1.5">
-                  <span className={label}>Nama channel (opsional)</span>
-                  <input name="channelTitle" maxLength={255} placeholder="Nama channel YouTube" className={field} />
-                </label>
-              )}
-              {isStudent && <p className="text-xs text-slate-600">Usulan akan tampil di katalog setelah disetujui admin.</p>}
+              <label className="flex items-start gap-3 rounded-2xl border border-slate-100 bg-slate-50 p-4 text-sm">
+                <input type="checkbox" className="mt-1 h-4 w-4 accent-orange-600" checked={draft.visibility === 'SHARED'}
+                  onChange={e => setDraft({ ...draft, visibility: e.target.checked ? 'SHARED' : 'PRIVATE' })} />
+                <span><b>Bagikan ke Katalog Bersama</b>
+                  <span className="block text-slate-600">{isStudent ? 'Tampil untuk semua anggota setelah disetujui admin.' : 'Langsung tampil untuk semua anggota.'} Jika tidak dicentang, hanya Anda yang melihatnya.</span>
+                </span>
+              </label>
               <div className="flex gap-3 pt-2">
-                <button type="button" onClick={() => setAdding(null)} className="flex-1 py-4 bg-slate-50 text-slate-500 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-slate-100">Batal</button>
-                <button type="submit" disabled={isSaving || !parsed || !!linkError}
+                <button type="button" onClick={() => setDraft(null)} className="flex-1 py-4 bg-slate-50 text-slate-500 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-slate-100">Batal</button>
+                <button type="submit" disabled={isSaving || !parsed}
                   className="flex-1 py-4 bg-orange-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest flex items-center justify-center gap-2 hover:bg-orange-700 disabled:opacity-50">
-                  {isSaving ? <Loader2 size={18} className="animate-spin" /> : <Save size={18} />} {isStudent ? 'Kirim usulan' : 'Simpan'}
+                  {isSaving ? <Loader2 size={18} className="animate-spin" /> : <Save size={18} />} Simpan
                 </button>
               </div>
             </form>

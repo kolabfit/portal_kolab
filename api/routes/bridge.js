@@ -9,7 +9,7 @@ import { repositoryActions, repositoryAction } from '../lib/repository.js';
 import { manageInternship } from '../lib/internships.js';
 import { saveArticleRelations } from '../lib/articleRelations.js';
 import { validateArticleContent } from '../lib/articleHtml.js';
-import { streamingActions, streamingAction, streamingCatalog } from '../lib/streaming.js';
+import { manageStreamingItem, listStreamingItems } from '../lib/streaming.js';
 
 const router = express.Router();
 const GAS_URL = process.env.GAS_URL;
@@ -44,7 +44,7 @@ router.post('/', requireSession, async (req, res) => {
     db = await pool.getConnection();
     await db.beginTransaction();
     const success = async result => {
-      if (!['getStudents', 'getLecturers', 'getStreamingCatalog'].includes(action)) {
+      if (!['getStudents', 'getLecturers', 'getStreamingItems'].includes(action)) {
         await db.execute('INSERT INTO system_logs (timestamp,action,user_id,details) VALUES (NOW(),?,?,?)', [action, req.user.id, JSON.stringify({
           id: id || payload.targetId || null,
           type,
@@ -61,8 +61,8 @@ router.post('/', requireSession, async (req, res) => {
       await saveProfile(db, req.user.role, req.user.role === 'ADMIN' ? req.user.username : req.user.id, payload);
       return await success({ status: 'success', id });
     }
-    if (action === 'getStreamingCatalog') return await success(await streamingCatalog(db, req.user));
-    if (streamingActions.includes(action)) return await success(await streamingAction(db, req.user, { ...payload, id }));
+    if (action === 'getStreamingItems') return await success(await listStreamingItems(db, req.user));
+    if (action === 'manageStreamingItem') return await success(await manageStreamingItem(db, req.user, payload));
     const collection = { manageStartup: 'startup_teams', manageInformasi: 'information', manageSchedule: 'schedules', scheduleAction: 'schedules', manageEvent: 'events', eventAction: 'events', manageArticle: 'articles', articleAction: 'articles', manageCategory: 'article_categories', manageTag: 'article_tags' }[action];
     if (collection) {
       if (!['add', 'edit', 'delete'].includes(type)) throw Object.assign(new Error('Operasi tidak valid.'), { status: 400 });

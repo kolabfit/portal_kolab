@@ -240,12 +240,7 @@ CREATE TABLE IF NOT EXISTS yplaylists (
   title VARCHAR(255),
   thumbnail TEXT,
   published_at DATETIME,
-  channel_title VARCHAR(255),
-  category VARCHAR(20) NOT NULL DEFAULT 'LAINNYA',
-  status VARCHAR(20) NOT NULL DEFAULT 'APPROVED',
-  added_by_role VARCHAR(20),
-  added_by_id VARCHAR(100),
-  added_by_name VARCHAR(255)
+  channel_title VARCHAR(255)
 );
 
 -- tvlive
@@ -253,12 +248,7 @@ CREATE TABLE IF NOT EXISTS tvlive (
   id VARCHAR(50) PRIMARY KEY,
   title VARCHAR(255),
   video_id VARCHAR(100),
-  thumbnail TEXT,
-  category VARCHAR(20) NOT NULL DEFAULT 'LAINNYA',
-  status VARCHAR(20) NOT NULL DEFAULT 'APPROVED',
-  added_by_role VARCHAR(20),
-  added_by_id VARCHAR(100),
-  added_by_name VARCHAR(255)
+  thumbnail TEXT
 );
 
 -- AuditForensic

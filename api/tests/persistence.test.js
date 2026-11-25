@@ -537,49 +537,63 @@ test('assets, streaming playlists and TV persist without field loss', async () =
   for (const [key, value] of Object.entries(assets)) assert.deepEqual(result[key], value);
   await bridge('updateAssets', { ...assets, logoUrl: 'new-logo' });
   assert.equal((await request('/data/assets')).logoUrl, 'new-logo');
-  await bridge('manageYPlaylist', { type: 'add', data: { playlistId: 'PLtestPlaylist01', title: 'Playlist', category: 'KULIAH', channelTitle: 'Channel' } });
-  await bridge('manageYPlaylist', { type: 'edit', id: 'PLtestPlaylist01', data: { title: 'Edited playlist' } });
-  const tv = await bridge('manageTvLive', { type: 'add', data: { title: 'TV', videoId: 'dQw4w9WgXcQ' } });
-  await bridge('manageTvLive', { type: 'edit', id: tv.id, data: { title: 'TV edited', videoId: 'jfKfPfyJRdk' } });
-  result = await request('/data/assets');
-  assert.equal(result.yPlaylists[0].title, 'Edited playlist');
-  assert.equal(result.tvChannels[0].videoId, 'jfKfPfyJRdk');
-  assert.equal(result.tvChannels[0].thumbnail, 'https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg');
-  assert.equal(result.tvChannels.length, 1);
+});
 
-  // Validation: bad IDs, category and thumbnail are rejected.
-  await bridge('manageYPlaylist', { type: 'add', data: { playlistId: 'pl', title: 'X' } }, token, 400);
-  await bridge('manageTvLive', { type: 'add', data: { title: 'X', videoId: 'bad id' } }, token, 400);
-  await bridge('manageTvLive', { type: 'add', data: { title: 'X', videoId: 'dQw4w9WgXcQ', category: 'NOPE' } }, token, 400);
-  await bridge('manageTvLive', { type: 'add', data: { title: 'X', videoId: 'dQw4w9WgXcQ', thumbnail: 'javascript:alert(1)' } }, token, 400);
+test('Streaming Hub: many items per member, YouTube and Spotify, sharing with student approval', async () => {
+  const add = (data, bearer = token, expected = 200) => bridge('manageStreamingItem', { type: 'add', data }, bearer, expected);
+  const list = bearer => bridge('getStreamingItems', {}, bearer).then(result => result.items);
+  const yt = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ';
+  const sp = 'https://open.spotify.com/intl-id/playlist/37i9dQZF1DX0XUsuxWHRQd?si=abc';
 
-  // Lecturers publish directly; students propose and wait for approval.
-  const lecturerItem = await bridge('manageYPlaylist', { type: 'add', data: { playlistId: 'PLlecturerList01', title: 'Kuliah', category: 'KULIAH' } }, lecturerToken);
-  assert.equal(lecturerItem.itemStatus, 'APPROVED');
-  const proposal = await bridge('manageTvLive', { type: 'add', data: { title: 'Usulan', videoId: 'aaaaaaaaaaa', category: 'WEBINAR' } }, studentToken);
+  // Validation: only YouTube/Spotify links, a title and a known category.
+  await add({ link: 'https://evil.example/x', title: 'X' }, studentToken, 400);
+  await add({ link: '<img src=x onerror=alert(1)>', title: 'X' }, studentToken, 400);
+  await add({ link: yt, title: '' }, studentToken, 400);
+  await add({ link: yt, title: 'X', category: 'NOPE' }, studentToken, 400);
+
+  // Several private items per member, visible only to their owner.
+  const mine1 = await add({ link: yt, title: 'Fokus kerja', category: 'MUSIK' }, studentToken);
+  const mine2 = await add({ link: sp, title: 'Lagu santai', category: 'MUSIK' }, studentToken);
+  const items = await list(studentToken);
+  const spotify = items.find(item => item.id === mine2.id);
+  assert.equal(spotify.provider, 'SPOTIFY');
+  assert.equal(spotify.embedUrl, 'https://open.spotify.com/embed/playlist/37i9dQZF1DX0XUsuxWHRQd');
+  assert.equal(items.find(item => item.id === mine1.id).thumbnail, 'https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg');
+  assert.ok(!(await list(lecturerToken)).some(item => item.id === mine1.id));
+
+  // Lecturers share directly; a student's shared item waits for an admin.
+  const lecturerShare = await add({ link: sp, title: 'Podcast startup', category: 'PODCAST', visibility: 'SHARED' }, lecturerToken);
+  assert.equal(lecturerShare.itemStatus, 'APPROVED');
+  assert.ok((await list(studentToken)).some(item => item.id === lecturerShare.id && !item.canEdit));
+  const proposal = await add({ link: yt, title: 'Rekaman acara', category: 'EVENT', visibility: 'SHARED' }, studentToken);
   assert.equal(proposal.itemStatus, 'PENDING');
-  assert.ok(!(await request('/data/assets')).tvChannels.some(item => item.id === proposal.id));
-  const studentView = await bridge('getStreamingCatalog', {}, studentToken);
-  assert.deepEqual(studentView.tv.find(item => item.id === proposal.id), {
-    id: proposal.id, videoId: 'aaaaaaaaaaa', title: 'Usulan', thumbnail: 'https://i.ytimg.com/vi/aaaaaaaaaaa/hqdefault.jpg',
-    category: 'WEBINAR', status: 'PENDING', addedByName: studentView.tv.find(item => item.id === proposal.id).addedByName, canDelete: true
-  });
-  assert.ok(!(await bridge('getStreamingCatalog', {}, lecturerToken)).tv.some(item => item.id === proposal.id));
-  assert.equal((await bridge('getStreamingCatalog', {}, lecturerToken)).playlists.find(item => item.playlistId === 'PLlecturerList01').canDelete, true);
-  assert.equal((await bridge('getStreamingCatalog', {}, studentToken)).playlists.find(item => item.playlistId === 'PLlecturerList01').canDelete, false);
+  assert.ok(!(await list(lecturerToken)).some(item => item.id === proposal.id));
+  assert.equal((await list(token)).find(item => item.id === proposal.id).status, 'PENDING');
 
-  // Only owners or admins delete; only admins approve or edit; students cannot overwrite an existing playlist.
-  await bridge('manageYPlaylist', { type: 'delete', id: 'PLlecturerList01' }, studentToken, 403);
-  await bridge('manageYPlaylist', { type: 'add', data: { playlistId: 'PLlecturerList01', title: 'Takeover' } }, studentToken, 409);
-  await bridge('manageTvLive', { type: 'approve', id: proposal.id }, studentToken, 403);
-  await bridge('manageTvLive', { type: 'edit', id: proposal.id, data: { title: 'Y' } }, lecturerToken, 403);
-  await bridge('manageTvLive', { type: 'approve', id: proposal.id });
-  assert.ok((await request('/data/assets')).tvChannels.some(item => item.id === proposal.id));
-  await bridge('manageTvLive', { type: 'delete', id: proposal.id }, studentToken);
-  await bridge('manageYPlaylist', { type: 'delete', id: 'PLlecturerList01' }, lecturerToken);
+  // Owners edit and delete their own items; only admins approve or touch other people's items.
+  await bridge('manageStreamingItem', { type: 'approve', id: proposal.id }, studentToken, 403);
+  await bridge('manageStreamingItem', { type: 'delete', id: lecturerShare.id }, studentToken, 403);
+  await bridge('manageStreamingItem', { type: 'edit', id: mine1.id, data: { title: 'X' } }, lecturerToken, 403);
+  await bridge('manageStreamingItem', { type: 'approve', id: proposal.id });
+  assert.ok((await list(lecturerToken)).some(item => item.id === proposal.id));
+  const edited = await bridge('manageStreamingItem', { type: 'edit', id: proposal.id, data: { title: 'Rekaman acara (edit)' } }, studentToken);
+  assert.equal(edited.itemStatus, 'PENDING');
+  await bridge('manageStreamingItem', { type: 'edit', id: mine1.id, data: { visibility: 'PRIVATE', title: 'Fokus' } }, studentToken);
+  for (const [id, bearer] of [[mine1.id, studentToken], [mine2.id, studentToken], [proposal.id, token], [lecturerShare.id, lecturerToken]]) {
+    await bridge('manageStreamingItem', { type: 'delete', id }, bearer);
+  }
 
-  await bridge('manageYPlaylist', { type: 'delete', id: 'PLtestPlaylist01' });
-  await bridge('manageTvLive', { type: 'delete', id: tv.id });
+  // First migration imports the old single playlist fields once; deleted items do not come back.
+  const { migrateStreaming } = await import('../lib/streaming.js');
+  await db.execute("UPDATE students SET youtube=? WHERE nim='test-student'", ['<iframe src="https://www.youtube.com/embed/videoseries?list=PLrAXtmErZgOeiKm4sgNOknGvNjby9efdf"></iframe>']);
+  await db.execute('DROP TABLE streaming_items');
+  await migrateStreaming(db);
+  const imported = (await list(studentToken)).filter(item => item.mine);
+  assert.deepEqual(imported.map(item => [item.visibility, item.embedUrl]), [['PRIVATE', 'https://www.youtube.com/embed/videoseries?list=PLrAXtmErZgOeiKm4sgNOknGvNjby9efdf']]);
+  await bridge('manageStreamingItem', { type: 'delete', id: imported[0].id }, studentToken);
+  await migrateStreaming(db);
+  assert.ok(!(await list(studentToken)).some(item => item.mine));
+  await db.execute("UPDATE students SET youtube='' WHERE nim='test-student'");
   assert.deepEqual((await request('/data/assets')).tvChannels, []);
 });
 
