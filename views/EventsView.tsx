@@ -2,7 +2,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { 
   Calendar as CalendarIcon, Plus, Search, Edit2, 
-  Trash2, X, Save, Image as ImageIcon, Loader2, MapPin, Clock, Users, Globe, CheckCircle2, Video, ExternalLink, Sparkles, Monitor, User, ChevronLeft, RefreshCw, Filter
+  Trash2, X, Save, Image as ImageIcon, Loader2, MapPin, Clock, Users, Globe, CheckCircle2, Video, ExternalLink, Monitor, User, ChevronLeft, Filter
 } from 'lucide-react';
 import { Event, UserRole } from '../types';
 import { api } from '../api';
@@ -12,21 +12,18 @@ interface EventsViewProps {
   events: Event[];
   isAdmin: boolean;
   currentUser: string;
-  userEmail?: string;
   onRefresh: () => void;
   onShowAlert: (title: string, msg: string, type: any) => void;
   showConfirm: (title: string, message: string, onConfirm: () => void) => void;
 }
 
-const EventsView: React.FC<EventsViewProps> = ({ events, isAdmin, currentUser, userEmail, onRefresh, onShowAlert, showConfirm }) => {
+const EventsView: React.FC<EventsViewProps> = ({ events, isAdmin, currentUser, onRefresh, onShowAlert, showConfirm }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedMonth, setSelectedMonth] = useState<string>('ALL');
   const [showForm, setShowForm] = useState(false);
   const [editingItem, setEditingItem] = useState<any | null>(null);
   const [previewItem, setPreviewItem] = useState<Event | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [isMeetGenerating, setIsMeetGenerating] = useState(false);
-  const [isHandshaking, setIsHandshaking] = useState(false);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [isOnlineMode, setIsOnlineMode] = useState<boolean>(false);
   const [meetLinkValue, setMeetLinkValue] = useState<string>('');
@@ -93,36 +90,6 @@ const EventsView: React.FC<EventsViewProps> = ({ events, isAdmin, currentUser, u
     });
   };
 
-  const handleCreateMeet = async () => {
-    const form = document.querySelector('#event-form') as HTMLFormElement;
-    if (!form) return;
-    const fd = new FormData(form);
-    const title = fd.get('title') as string;
-    const date = fd.get('date') as string;
-    const time = fd.get('time') as string;
-    if (!title || !date || !time) { onShowAlert('Data Incomplete', 'Lengkapi data transmisi sebelum generate Meet.', 'error'); return; }
-    setIsMeetGenerating(true);
-    const res = await api.generateMeetLink(title, `${date}T${time}:00`, fd.get('description') as string);
-    setIsMeetGenerating(false);
-    if (res?.status === 'success') { setMeetLinkValue(res.url); onShowAlert('Synced', 'Google Meet Hub Online.', 'success'); }
-    else onShowAlert('Meet gagal', res?.message || 'Layanan Meet tidak tersedia.', 'error');
-  };
-
-  const handleJoinMeet = async (meetLink: string) => {
-    if (!userEmail) {
-      window.open(meetLink, '_blank');
-      return;
-    }
-    setIsHandshaking(true);
-    try {
-      // Auto-Invite Protocol Handshake
-      await api.autoInviteToMeet(meetLink, userEmail);
-    } catch (e) {
-      console.warn("Handshake bypassed due to node timeout.");
-    }
-    setIsHandshaking(false);
-    window.open(meetLink, '_blank');
-  };
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -237,23 +204,19 @@ const EventsView: React.FC<EventsViewProps> = ({ events, isAdmin, currentUser, u
                  {previewItem.locationOnline === "Yes" && previewItem.meetLink && (
                    <div className="bg-emerald-50 p-10 rounded-[3rem] border-2 border-emerald-100 flex flex-col md:flex-row items-center justify-between gap-8 group">
                       <div className="flex items-center gap-6">
-                         <div className={`w-16 h-16 rounded-2xl flex items-center justify-center shadow-xl group-hover:scale-110 transition-transform ${isHandshaking ? 'bg-white text-emerald-600' : 'bg-emerald-500 text-white'}`}>
-                            {isHandshaking ? <RefreshCw className="animate-spin" size={32}/> : <Video size={32}/>}
+                         <div className="w-16 h-16 rounded-2xl flex items-center justify-center shadow-xl group-hover:scale-110 transition-transform bg-emerald-500 text-white">
+                            <Video size={32}/>
                          </div>
                          <div>
                             <h5 className="font-black text-emerald-900 text-xl tracking-tight">Access Secure Link</h5>
-                            <p className="text-xs font-bold text-emerald-600 uppercase tracking-widest mt-1">
-                              {isHandshaking ? "Bypassing moderasi join..." : "Authorized Member Cluster Only"}
-                            </p>
+                            <p className="text-xs font-bold text-emerald-600 uppercase tracking-widest mt-1">Authorized Member Cluster Only</p>
                          </div>
                       </div>
-                      <button 
-                        onClick={() => previewItem.meetLink && handleJoinMeet(previewItem.meetLink)}
-                        disabled={isHandshaking}
-                        className="w-full md:w-auto px-10 py-5 bg-white text-emerald-600 rounded-2xl font-black uppercase text-[10px] tracking-[0.2em] shadow-xl hover:bg-emerald-600 hover:text-white transition-all flex items-center justify-center gap-4 disabled:opacity-50"
+                      <a href={previewItem.meetLink} target="_blank" rel="noopener noreferrer"
+                        className="w-full md:w-auto px-10 py-5 bg-white text-emerald-600 rounded-2xl font-black uppercase text-[10px] tracking-[0.2em] shadow-xl hover:bg-emerald-600 hover:text-white transition-all flex items-center justify-center gap-4"
                       >
-                         {isHandshaking ? "Handshaking..." : "Join Transmission"} <ExternalLink size={18}/>
-                      </button>
+                         Join Transmission <ExternalLink size={18}/>
+                      </a>
                    </div>
                  )}
               </div>
@@ -358,12 +321,7 @@ const EventsView: React.FC<EventsViewProps> = ({ events, isAdmin, currentUser, u
                       {!isOnlineMode ? (
                         <input name="locationOffline" defaultValue={editingItem?.locationOffline} placeholder="Source Venue" className="w-full px-6 py-4 bg-slate-50 rounded-2xl font-bold outline-none border border-transparent focus:border-orange-100 transition-all shadow-inner" />
                       ) : (
-                        <div className="flex gap-2">
-                           <input value={meetLinkValue} onChange={e => setMeetLinkValue(e.target.value)} placeholder="Meet Access Token" className="flex-1 px-6 py-4 bg-emerald-50 rounded-2xl font-bold outline-none border border-transparent focus:border-emerald-200 transition-all shadow-inner"/>
-                           <button type="button" onClick={handleCreateMeet} disabled={isMeetGenerating} className="px-6 bg-emerald-500 text-white rounded-2xl hover:bg-emerald-600 transition-all active:scale-95 shadow-lg shadow-emerald-100">
-                             {isMeetGenerating ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16}/>}
-                           </button>
-                        </div>
+                        <input value={meetLinkValue} onChange={e => setMeetLinkValue(e.target.value)} placeholder="Tempel link Google Meet (https://meet.google.com/...)" className="w-full px-6 py-4 bg-emerald-50 rounded-2xl font-bold outline-none border border-transparent focus:border-emerald-200 transition-all shadow-inner"/>
                       )}
                       
                       <div className="grid grid-cols-2 gap-4">

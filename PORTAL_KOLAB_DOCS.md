@@ -9,7 +9,7 @@ Aplikasi ini mencakup berbagai modul untuk melacak status kegiatan, mengelola re
 - **Frontend**: React (dengan Vite), TypeScript, Tailwind CSS, Lucide React (untuk ikon).
 - **Backend**: Node.js (Express.js), MySQL/MariaDB (menggunakan mysql2).
 - **File Storage/CDN**: Terintegrasi dengan **Kroombox CDN** untuk manajemen penyimpanan file repository dan media.
-- **Integrasi Pihak Ketiga**: Google Apps Script (GAS) untuk pembuatan link Google Meet secara otomatis (generateMeetLink).
+- **Integrasi Pihak Ketiga**: Tidak memakai Google Apps Script; semua data berada di MySQL.
 
 ## 👥 Peran Pengguna (Role System)
 Aplikasi ini menggunakan sistem akses berbasis peran (Role-Based Access Control):
@@ -44,7 +44,7 @@ Aplikasi ini menggunakan sistem akses berbasis peran (Role-Based Access Control)
 
 ### 6. Penjadwalan & Rapat (Meetings & Events)
 - **MeetingsView**: Pembuatan jadwal rapat atau bimbingan.
-- **Integrasi Google Meet**: Dapat meng-*generate* tautan Google Meet secara otomatis via Google Apps Script (GAS) API.
+- **Google Meet**: Admin menempel tautan Google Meet secara manual pada event online.
 - **EventsView**: Pengelolaan acara berskala besar (webinar, pameran).
 
 ### 7. Streaming & Media (Streaming Hub)

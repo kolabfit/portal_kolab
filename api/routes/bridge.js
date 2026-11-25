@@ -1,6 +1,5 @@
 import express from 'express';
 import pool from '../lib/db.js';
-import axios from 'axios';
 import crypto from 'node:crypto';
 import { requireSession } from '../lib/session.js';
 import { record } from '../lib/serializers.js';
@@ -12,7 +11,6 @@ import { validateArticleContent } from '../lib/articleHtml.js';
 import { manageStreamingItem, listStreamingItems } from '../lib/streaming.js';
 
 const router = express.Router();
-const GAS_URL = process.env.GAS_URL;
 
 const generatedId = (prefix, id) => id || `${prefix}-${crypto.randomUUID()}`;
 const json = value => JSON.stringify(value || {});
@@ -23,12 +21,6 @@ const slugify = value => String(value || '')
   .replace(/[\u0300-\u036f]/g, '')
   .replace(/[^a-z0-9]+/g, '-')
   .replace(/^-+|-+$/g, '');
-
-async function proxyToGas(payload, action) {
-  if (!GAS_URL) throw new Error('GAS_URL belum dikonfigurasi untuk integrasi Google Meet.');
-  const response = await axios.post(GAS_URL, action ? { ...payload, action } : payload, { timeout: 20000 });
-  return response.data;
-}
 
 router.post('/', requireSession, async (req, res) => {
   const payload = req.body || {};
@@ -471,17 +463,6 @@ router.post('/', requireSession, async (req, res) => {
         }
         if (type !== 'delete') await saveArticleRelations(db, id, data, req.user);
         return await success({ status: 'success', id });
-
-      case 'generateMeetLink':
-      case 'autoInviteToMeet':
-        try {
-          const result = await proxyToGas(payload, action);
-          if (result?.status !== 'success') return res.status(502).json({ status: 'error', message: result?.message || 'Integrasi Google gagal.' });
-          await db.execute('INSERT INTO integration_results (id,action,user_id,request_data,response_data) VALUES (?,?,?,?,?)', [crypto.randomUUID(), action, req.user.id, JSON.stringify(payload), JSON.stringify(result)]);
-          return await success(result);
-        } catch (error) {
-          return res.status(502).json({ status: 'error', message: `GAS Proxy Error: ${error.message}` });
-        }
 
       default:
         return res.status(400).json({ status: 'error', message: `Action ${action} not implemented in bridge.` });

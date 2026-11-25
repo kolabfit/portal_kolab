@@ -346,12 +346,6 @@ export const api = {
   /**
    * AI Content Generation
    */
-  async generateMeetLink(title: string, startTime: string, description: string) {
-    return this.postData('generateMeetLink', { title, startTime, description });
-  },
-  async autoInviteToMeet(meetLink: string, email: string) {
-    return this.postData('autoInviteToMeet', { meetLink, email });
-  },
   async generateAI(prompt: string, model?: string) {
     try {
       const response = await fetch(`${API_BASE_URL}/ai/generate`, {

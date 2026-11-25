@@ -7,7 +7,6 @@ const router = express.Router();
 
 /**
  * @desc Get all photobooth settings (config, icons, frames, filters, backgrounds)
- * Equivalent to action=getAll in GAS
  */
 router.get('/', async (req, res) => {
   try {
@@ -39,7 +38,6 @@ router.get('/', async (req, res) => {
 
 /**
  * @desc Save all photobooth settings
- * Equivalent to action=saveAll in GAS
  */
 router.post('/', requireSession, async (req, res) => {
   if (req.user.role !== 'ADMIN') return res.status(403).json({ status: 'error', message: 'Akses admin diperlukan.' });
