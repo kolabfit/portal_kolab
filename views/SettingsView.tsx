@@ -88,36 +88,6 @@ const SettingsView: React.FC<SettingsViewProps> = ({ assets, setAssets, onAssetU
                     isImage 
                  />
               </div>
-
-              <div className="pt-8 border-t border-slate-50 space-y-6">
-                <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] px-2 flex items-center gap-2">
-                  <Save size={14} className="text-orange-600" /> Global Fallback Streams
-                </h4>
-                <div className="space-y-6">
-                   <div className="space-y-2">
-                      <label className="text-[9px] font-black text-slate-400 uppercase ml-2 flex items-center gap-2">
-                         <Youtube size={12} className="text-red-600"/> Admin Youtube Embed
-                      </label>
-                      <textarea 
-                         value={assets.adminYoutube || ''} 
-                         onChange={e => setAssets({ ...assets, adminYoutube: e.target.value })}
-                         placeholder='<iframe ...></iframe>'
-                         className="w-full px-6 py-4 bg-slate-50 rounded-2xl font-mono text-[10px] focus:ring-4 focus:ring-orange-100 outline-none resize-none" rows={3} 
-                      />
-                   </div>
-                   <div className="space-y-2">
-                      <label className="text-[9px] font-black text-slate-400 uppercase ml-2 flex items-center gap-2">
-                         <Music size={12} className="text-emerald-600"/> Admin Spotify Embed
-                      </label>
-                      <textarea 
-                         value={assets.adminSpotify || ''} 
-                         onChange={e => setAssets({ ...assets, adminSpotify: e.target.value })}
-                         placeholder='<iframe ...></iframe>'
-                         className="w-full px-6 py-4 bg-slate-50 rounded-2xl font-mono text-[10px] focus:ring-4 focus:ring-orange-100 outline-none resize-none" rows={3} 
-                      />
-                   </div>
-                </div>
-              </div>
            </div>
         </section>
 

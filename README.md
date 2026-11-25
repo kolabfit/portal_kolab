@@ -153,3 +153,20 @@ Menu **Virtual Office 3D** tersedia untuk admin, mahasiswa, dan dosen setelah lo
 Admin dapat membuka **Kelola Virtual Office** untuk mengubah nama dan deskripsi setiap area atau mengatur publikasi denah. Admin juga bisa menambah, memindahkan, mengedit, dan menghapus penanda orang dari bagian **Posisi orang di denah**. Pilih ruang, lalu pilih orang dari **Tambah mahasiswa atau dosen**. Nama dan jabatan diambil dari profil: posisi startup untuk mahasiswa startup, job desk untuk mahasiswa lain, dan job desk pertama untuk dosen. Kosongkan kolom jabatan untuk memakai data profil, atau isi untuk menggantinya. Untuk tamu atau staf tanpa akun, pilih **Tambah orang lain** dan isi nama serta jabatan. Klik lantai pada model 3D, lalu **Simpan pengaturan**. Setiap mahasiswa atau dosen hanya bisa punya satu posisi. Akun yang dinonaktifkan atau belum disetujui otomatis disembunyikan dari denah dan ditandai untuk admin. Penanda muncul di tampilan ruang dan daftar orang pada ruang tersebut.
 
 Ukuran ruang dan lebar lorong masih perkiraan dan disimpan di `api/lib/virtualOfficeFloors.js`. Scene 3D dan validasi API memakai file yang sama. Posisi ruang pada denah gabungan dihitung dari ukuran tersebut di `overviewPlan()` (`lib/virtualOfficeScene.js`). Setelah mengubah ukuran, jalankan `npm test` dan `npx playwright test tests/browser/virtual-office.spec.ts`, lalu render ulang `api/assets/virtual-office-map.png` dari `tests/browser/virtual-office.html?labels`. Instalasi baru memakai `schema.sql`. Untuk database yang sudah ada, jalankan `npm --prefix api run db:migrate`, lalu mulai ulang backend. Denah ditayangkan secara bawaan.
+
+## Streaming Hub
+
+Streaming Hub dipakai untuk menyimpan dan membagikan apa saja yang bermanfaat dari YouTube atau Spotify. Contohnya musik kerja, podcast, rekaman acara, materi, inspirasi, dan hiburan. Klik ikon **?** di halaman untuk panduan singkat.
+
+- **Tambah**: tempel link YouTube (video, playlist, live, shorts) atau Spotify (playlist, album, lagu, artis, podcast, episode), lalu isi judul dan kategori. Setiap anggota boleh menyimpan banyak item, sampai 200 per akun.
+- **Koleksi Saya**: semua item milik sendiri. Item **Pribadi** hanya terlihat oleh pemiliknya.
+- **Katalog Bersama**: item yang dicentang **Bagikan ke Katalog Bersama**, dengan filter platform (YouTube/Spotify) dan kategori. Kategorinya Edukasi, Musik, Podcast, Hiburan, Inspirasi, Startup & Bisnis, Event & Webinar, Siaran Live, dan Lainnya.
+- Item yang dibagikan admin atau dosen langsung tampil. Item mahasiswa tampil setelah admin memilih **Setujui**. Kalau mahasiswa mengubah item yang sudah dibagikan, item itu ditinjau ulang. Pemilik bisa mengubah dan menghapus itemnya sendiri. Admin bisa mengubah dan menghapus semua item.
+
+Data disimpan di tabel `streaming_items`. Server membuat tabel itu saat start, atau lewat `npm --prefix api run db:migrate`. Saat tabel pertama kali dibuat, data lama disalin satu kali:
+- playlist YouTube profil setiap anggota menjadi item Pribadi;
+- playlist bawaan admin menjadi item Katalog Bersama;
+- isi Watch (`yplaylists`) menjadi item Katalog Bersama;
+- isi TV Live (`tvlive`) menjadi item Katalog Bersama dengan kategori Siaran Live.
+
+Input playlist di Profil dan Settings sudah dihapus. Hanya link YouTube dan Spotify yang diterima. Kode `<iframe>` lama tetap terbaca, karena hanya URL di dalamnya yang dipakai.
