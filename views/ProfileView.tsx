@@ -153,21 +153,7 @@ const ProfileView: React.FC<ProfileViewProps> = ({ profile, setProfile, startups
                   </div>
                 </div>
 
-                <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.4em] flex items-center gap-3 pt-4"><Radio size={18} /> Multimedia Streaming</h3>
-                <div className="space-y-6">
-                   <div>
-                     <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 px-2 flex items-center gap-2">
-                        <Youtube size={14} className="text-red-600" /> Youtube Playlist Embed HTML
-                     </label>
-                     <textarea value={profile.youtube || ''} onChange={e => setProfile({...profile, youtube: e.target.value})} placeholder='<iframe width="560" height="315" ...></iframe>' className="w-full px-6 py-4 bg-slate-50 border-0 rounded-2xl font-mono text-[10px] focus:ring-4 focus:ring-orange-100 outline-none resize-none" rows={3} />
-                   </div>
-                   <div>
-                     <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 px-2 flex items-center gap-2">
-                        <Music size={14} className="text-emerald-600" /> Spotify Playlist Embed HTML
-                     </label>
-                     <textarea value={profile.spotify || ''} onChange={e => setProfile({...profile, spotify: e.target.value})} placeholder='<iframe style="border-radius:12px" ...></iframe>' className="w-full px-6 py-4 bg-slate-50 border-0 rounded-2xl font-mono text-[10px] focus:ring-4 focus:ring-orange-100 outline-none resize-none" rows={3} />
-                   </div>
-                </div>
+                <p className="text-xs text-slate-500 flex items-center gap-2 pt-4"><Radio size={16} /> Playlist YouTube dan Spotify kini dikelola di menu Streaming Hub.</p>
               </div>
 
               <div className="space-y-8">
