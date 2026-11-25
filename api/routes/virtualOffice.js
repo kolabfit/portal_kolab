@@ -82,6 +82,28 @@ function present(rooms, members, admin) {
 
 const hasMembers = rooms => Object.values(rooms).some(room => room.people?.some(person => person.member));
 
+// Public (login/register page): room names, descriptions and anonymous figure positions only. No names or titles.
+router.get('/public', async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  const [[row]] = await db.execute('SELECT is_published, room_overrides FROM virtual_office_settings WHERE id=1');
+  if (!row?.is_published) return res.json({ published: false });
+  const rooms = row.room_overrides;
+  const shown = hasMembers(rooms) ? present(rooms, await activeMembers(db), false) : rooms;
+  res.json({
+    published: true,
+    rooms: Object.fromEntries(Object.entries(shown).map(([id, room]) => [id, {
+      name: room.name, description: room.description,
+      ...(room.people ? { people: room.people.map(({ id, point }) => ({ id, name: '', title: '', point })) } : {})
+    }]))
+  });
+});
+
+router.get('/public/map', async (req, res) => {
+  const [[row]] = await db.execute('SELECT is_published FROM virtual_office_settings WHERE id=1');
+  if (!row?.is_published) return res.status(404).json({ message: 'Virtual Office belum ditayangkan.' });
+  res.sendFile(mapFile, { cacheControl: false, lastModified: false });
+});
+
 router.use(requireSession, (req, res, next) => {
   res.set('Cache-Control', 'no-store');
   next();
