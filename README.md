@@ -167,3 +167,7 @@ Data disimpan di tabel `streaming_items`. Server membuat tabel itu saat start, a
 - isi TV Live (`tvlive`) menjadi item Katalog Bersama dengan kategori Siaran Live.
 
 Input playlist di Profil dan Settings sudah dihapus. Hanya link YouTube dan Spotify yang diterima. Kode `<iframe>` lama tetap terbaca, karena hanya URL di dalamnya yang dipakai.
+
+## Meeting online di Schedule dan Event
+
+Centang **Meeting online** di form Schedule, atau pilih **Digital Stream** di form Event, lalu tempel link Google Meet (`https://meet.google.com/...`) atau Zoom (`https://...zoom.us/j/...`). Form langsung menunjukkan platform yang terdeteksi. Peserta membuka meeting lewat tombol **Gabung Google Meet** atau **Gabung Zoom**. API hanya menerima link `https` dari kedua layanan itu (`api/lib/meetingLinks.js`) dan mengosongkan link saat acara diubah menjadi offline. Jadwal lama yang menaruh URL meet di kolom lokasi tetap mendapat tombol Gabung.

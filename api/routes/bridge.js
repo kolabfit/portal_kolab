@@ -9,6 +9,16 @@ import { manageInternship } from '../lib/internships.js';
 import { saveArticleRelations } from '../lib/articleRelations.js';
 import { validateArticleContent } from '../lib/articleHtml.js';
 import { manageStreamingItem, listStreamingItems } from '../lib/streaming.js';
+import { parseMeetingLink } from '../lib/meetingLinks.js';
+
+const isOnline = value => [true, 1, 'true', 'Yes', 'on'].includes(value);
+// Online schedules/events must carry a Google Meet or Zoom link; offline ones carry none.
+const meetingLinkFor = (online, link) => {
+  if (!online) return '';
+  const meeting = parseMeetingLink(link);
+  if (!meeting) throw Object.assign(new Error('Link meeting online harus link Google Meet (https://meet.google.com/...) atau Zoom (https://...zoom.us/j/...).'), { status: 400 });
+  return meeting.url;
+};
 
 const router = express.Router();
 
@@ -413,15 +423,19 @@ router.post('/', requireSession, async (req, res) => {
       case 'scheduleAction':
         if (type === 'delete') {
           await db.execute('DELETE FROM schedules WHERE id=?', [id]);
-        } else if (type === 'add') {
+          return await success({ status: 'success', id });
+        }
+        data.locationOnline = isOnline(data.locationOnline);
+        data.meetLink = meetingLinkFor(data.locationOnline, data.meetLink);
+        if (type === 'add') {
           await db.execute(
             'INSERT INTO schedules (id, title, date, time, location_offline, location_online, meet_link, organizer, description, end_time, author) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-            [generatedId('schedule', id), data.title, data.date, data.time, data.locationOffline || '', [true, 1, 'true', 'Yes', 'on'].includes(data.locationOnline), data.meetLink || '', data.organizer || '', data.description || '', data.endTime || null, data.author || '']
+            [generatedId('schedule', id), data.title, data.date, data.time, data.locationOffline || '', data.locationOnline, data.meetLink, data.organizer || '', data.description || '', data.endTime || null, data.author || '']
           );
         } else {
           await db.execute(
             'UPDATE schedules SET title=?, date=?, time=?, location_offline=?, location_online=?, meet_link=?, organizer=?, description=?, end_time=?, author=? WHERE id=?',
-            [data.title, data.date, data.time, data.locationOffline || '', [true, 1, 'true', 'Yes', 'on'].includes(data.locationOnline), data.meetLink || '', data.organizer || '', data.description || '', data.endTime || null, data.author || '', id]
+            [data.title, data.date, data.time, data.locationOffline || '', data.locationOnline, data.meetLink, data.organizer || '', data.description || '', data.endTime || null, data.author || '', id]
           );
         }
         return await success({ status: 'success', id });
@@ -430,7 +444,10 @@ router.post('/', requireSession, async (req, res) => {
       case 'eventAction':
         if (type === 'delete') {
           await db.execute('DELETE FROM events WHERE id=?', [id]);
-        } else if (type === 'add') {
+          return await success({ status: 'success', id });
+        }
+        data.meetLink = meetingLinkFor(isOnline(data.locationOnline), data.meetLink);
+        if (type === 'add') {
           await db.execute(
             'INSERT INTO events (id, title, date, image_url, description, location_offline, location_online, max_participants, status, tags, meet_link, time, author) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
             [generatedId('event', id), data.title, data.date, data.image || '', data.description || '', data.locationOffline || '', data.locationOnline || '', data.maxParticipants || 0, data.status || 'OPEN', JSON.stringify(Array.isArray(data.tags) ? data.tags : String(data.tags || '').split(',').filter(Boolean)), data.meetLink || '', data.time || null, data.author || '']
