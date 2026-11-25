@@ -422,6 +422,8 @@ test('Virtual Office is readable by all signed-in roles and only admins can cont
     assert.deepEqual(await (await office('', memberToken)).json(), { published: false });
     assert.equal((await office('/map', memberToken)).status, 404);
   }
+  assert.deepEqual(await (await office('/public', null)).json(), { published: false });
+  assert.equal((await office('/public/map', null)).status, 404);
   assert.equal((await office('/map')).status, 200);
   await (await import('../lib/virtualOffice.js')).migrateVirtualOffice(db);
   assert.deepEqual(await (await office()).json(), saved);
@@ -445,6 +447,11 @@ test('Virtual Office is readable by all signed-in roles and only admins can cont
   assert.ok(adminPerson.defaultTitle);
   assert.deepEqual((await (await office('', studentToken)).json()).rooms.studio.people,
     [{ id: 'member-one', name: student.name, title: adminPerson.defaultTitle, point: { x: 0, z: 0 } }]);
+  // Login page: no token, anonymous figure positions only.
+  const publicView = await office('/public', null);
+  assert.equal(publicView.status, 200);
+  assert.deepEqual((await publicView.json()).rooms.studio.people, [{ id: 'member-one', name: '', title: '', point: { x: 0, z: 0 } }]);
+  assert.equal((await office('/public/map', null)).status, 200);
   for (const rooms of [
     { studio: { people: [linked] }, jago: { people: [{ ...linked, id: 'member-two' }] } },
     { studio: { people: [{ ...linked, member: { role: 'STUDENT', id: 'missing-member' } }] } }

@@ -1,7 +1,9 @@
-﻿import React, { useState } from 'react';
+﻿import React, { useState, lazy, Suspense } from 'react';
 import { UserRole, AppAssets } from '../types';
-import { Shield, ArrowRight, User, BookOpen, Lock, Terminal, UserPlus, Fingerprint, Loader2 } from 'lucide-react';
+import { Shield, ArrowRight, User, BookOpen, Lock, Terminal, UserPlus, Fingerprint, Loader2, Box, X } from 'lucide-react';
 import { api } from '../api';
+
+const PublicVirtualOffice = lazy(() => import('./VirtualOfficeView').then(module => ({ default: module.PublicVirtualOffice })));
 
 interface LoginViewProps {
   onLogin: (role: UserRole, id: string, pass: string) => void;
@@ -22,6 +24,7 @@ const LoginView: React.FC<LoginViewProps> = ({ onLogin, onAdminLogin, onRegister
   const [isForgotMode, setIsForgotMode] = useState(false);
   const [resetMessage, setResetMessage] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [showOffice, setShowOffice] = useState(false);
 
   const toggleForgotMode = () => {
     setIsForgotMode(!isForgotMode);
@@ -90,6 +93,12 @@ const LoginView: React.FC<LoginViewProps> = ({ onLogin, onAdminLogin, onRegister
              {isAdminMode ? 'Root Security Access Terminal' : isRegisterMode ? 'Identity Registration Protocol' : 'Creative Ecosystem Access Terminal'}
            </p>
            <div className={`mt-12 w-24 h-1.5 rounded-full transition-colors duration-700 ${isAdminMode ? 'bg-red-600' : 'bg-orange-600'}`}></div>
+           {!isAdminMode && (
+             <button type="button" onClick={() => setShowOffice(true)}
+               className="mt-10 inline-flex items-center gap-3 rounded-2xl bg-orange-600 px-6 py-4 text-sm font-black uppercase tracking-widest text-white shadow-lg shadow-orange-900/40 transition hover:bg-orange-500 focus:outline-none focus:ring-4 focus:ring-orange-400/50">
+               <Box aria-hidden size={20} /> Lihat Ko+Lab 3D
+             </button>
+           )}
         </div>
 
         <div className="absolute bottom-12 text-slate-500 text-[10px] font-black uppercase tracking-[0.4em] z-10">
@@ -304,6 +313,25 @@ const LoginView: React.FC<LoginViewProps> = ({ onLogin, onAdminLogin, onRegister
           </p>
         </div>
       </div>
+
+      {showOffice && (
+        <div role="dialog" aria-modal="true" aria-label="Virtual Office Ko+Lab"
+          className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-950/70 p-4 sm:p-8"
+          onKeyDown={event => { if (event.key === 'Escape') setShowOffice(false); }}>
+          <div className="w-full max-w-5xl space-y-3">
+            <div className="flex items-center justify-between gap-3 text-white">
+              <h2 className="flex items-center gap-2 text-xl font-black"><Box aria-hidden size={22} /> Virtual Office Ko+Lab</h2>
+              <button type="button" autoFocus onClick={() => setShowOffice(false)} aria-label="Tutup Virtual Office"
+                className="rounded-xl bg-white/10 p-2 hover:bg-white/20 focus:outline-none focus:ring-2 focus:ring-orange-400">
+                <X aria-hidden size={22} />
+              </button>
+            </div>
+            <Suspense fallback={<p role="status" className="text-sm text-white">Memuat Virtual Office…</p>}>
+              <PublicVirtualOffice />
+            </Suspense>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

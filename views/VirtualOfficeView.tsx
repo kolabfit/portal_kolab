@@ -78,8 +78,9 @@ function Viewer({ rooms, fixedArea, onPick, selectedPerson }: {
 
   useEffect(() => {
     if (status !== 'ready') return;
-    scene.current?.setMarkers(people.flatMap(person => person.point ? [{ id: person.id, ...person.point }] : []));
-  }, [people, status]);
+    scene.current?.setMarkers(virtualOfficeRoomIds.flatMap(room => (rooms[room]?.people ?? emptyPeople)
+      .flatMap(person => person.point ? [{ id: person.id, room, ...person.point }] : [])));
+  }, [rooms, status]);
 
   useEffect(() => {
     if (!staticView) return;
@@ -144,7 +145,7 @@ function Viewer({ rooms, fixedArea, onPick, selectedPerson }: {
             );
           }
           const person = people.find(person => person.id === marker.id);
-          if (!person) return null;
+          if (!person || (!person.name && !onPick)) return null;
           const title = person.title || person.defaultTitle;
           return (
             <div key={marker.id} aria-hidden="true"
@@ -207,7 +208,7 @@ function Viewer({ rooms, fixedArea, onPick, selectedPerson }: {
         )}
         <span className="text-slate-600">Ukuran ruang dan lebar lorong masih perkiraan.</span>
       </div>
-      {!fixedArea && area !== 'overview' && people.length > 0 && (
+      {!fixedArea && area !== 'overview' && people.some(person => person.name) && (
         <div className="mt-4 border-t border-slate-200 pt-4">
           <h3 className="mb-2 text-sm font-semibold">Orang di ruang ini</h3>
           <ul className="flex flex-wrap gap-2">
@@ -237,6 +238,10 @@ function PeopleEditor({ rooms, update }: {
   const placed = new Set(virtualOfficeRoomIds.flatMap(id => rooms[id]?.people ?? emptyPeople)
     .flatMap(person => person.member ? [memberKey(person.member)] : []));
   const available = (members ?? []).filter(member => !placed.has(memberKey(member)));
+  const [query, setQuery] = useState('');
+  const needle = query.trim().toLowerCase();
+  const matches = needle ? available.filter(member =>
+    member.name.toLowerCase().includes(needle) || String(member.id).toLowerCase().includes(needle)).slice(0, 8) : [];
 
   useEffect(() => {
     let mounted = true;
@@ -258,6 +263,11 @@ function PeopleEditor({ rooms, update }: {
     setSelectedId(person.id);
   }
 
+  function pick(member: VirtualOfficeMember) {
+    add({ id: newId(), member: { role: member.role, id: member.id }, name: member.name, title: '', defaultTitle: member.title });
+    setQuery('');
+  }
+
   return (
     <section aria-label="Posisi orang di denah" className="space-y-4 rounded-xl border border-slate-200 p-4">
       <div className="flex flex-wrap items-end justify-between gap-3">
@@ -275,28 +285,33 @@ function PeopleEditor({ rooms, update }: {
             </select>
           </label>
         </div>
-        <div className="flex flex-wrap items-end gap-2">
-          <label className="block w-full max-w-xs space-y-1 text-sm">
+        <div className="relative w-full max-w-sm text-sm">
+          <label className="block space-y-1">
             <span>Tambah mahasiswa atau dosen</span>
-            <select className={inputStyle} value="" disabled={people.length >= 40 || !available.length} onChange={event => {
-              const member = available.find(candidate => memberKey(candidate) === event.target.value);
-              if (member) add({
-                id: newId(), member: { role: member.role, id: member.id },
-                name: member.name, title: '', defaultTitle: member.title
-              });
-            }}>
-              <option value="">{!members ? 'Memuat daftar…' : available.length ? 'Pilih orang…' : 'Semua sudah punya posisi'}</option>
-              {(['STUDENT', 'LECTURER'] as const).map(role => (
-                <optgroup key={role} label={role === 'STUDENT' ? 'Mahasiswa' : 'Dosen'}>
-                  {available.filter(member => member.role === role).map(member => (
-                    <option key={memberKey(member)} value={memberKey(member)}>{member.name} ({member.id}) · {member.title}</option>
-                  ))}
-                </optgroup>
-              ))}
-            </select>
+            <input className={inputStyle} type="search" role="combobox" aria-expanded={matches.length > 0}
+              aria-controls="vo-member-results" aria-autocomplete="list" value={query} maxLength={100}
+              disabled={people.length >= 40 || !members}
+              placeholder={!members ? 'Memuat daftar…' : available.length ? 'Ketik nama, NIM, atau NIP…' : 'Semua sudah punya posisi'}
+              onChange={event => setQuery(event.target.value)}
+              onKeyDown={event => {
+                if (event.key === 'Enter' && matches[0]) { event.preventDefault(); pick(matches[0]); }
+                if (event.key === 'Escape') setQuery('');
+              }} />
           </label>
-          <button type="button" className={secondary} disabled={people.length >= 40}
-            onClick={() => add({ id: newId(), name: '', title: '' })}>Tambah orang lain</button>
+          {query.trim() && (
+            <ul id="vo-member-results" role="listbox" className="absolute z-10 mt-1 max-h-72 w-full overflow-auto rounded-lg border border-slate-200 bg-white shadow-lg">
+              {matches.length === 0 && <li className="px-3 py-2 text-slate-600">Tidak ada mahasiswa atau dosen yang cocok.</li>}
+              {matches.map(member => (
+                <li key={memberKey(member)} role="option" aria-selected={false}>
+                  <button type="button" className="w-full px-3 py-2 text-left hover:bg-slate-100 focus:bg-slate-100" onClick={() => pick(member)}>
+                    <span className="font-semibold">{member.name}</span>
+                    <span className="ml-2 rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-700">{member.role === 'STUDENT' ? 'Mahasiswa' : 'Dosen'}</span>
+                    <span className="block text-slate-600">{member.id} · {member.title}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       </div>
       {membersError && <p role="alert" className="text-sm text-red-700">{membersError}</p>}
@@ -455,6 +470,22 @@ function Settings({
       {notice && <p role="status" className="mt-3 text-sm font-medium text-emerald-800">{notice}</p>}
     </form>
   );
+}
+
+// Login/register page preview: no token, so names and titles are never sent.
+export function PublicVirtualOffice() {
+  const [settings, setSettings] = useState<VirtualOfficeSettings | null>(null);
+  const [error, setError] = useState('');
+  useEffect(() => {
+    let mounted = true;
+    api.virtualOfficePublic().then(result => { if (mounted) setSettings(result); })
+      .catch(error => { if (mounted) setError(requestError(error, 'Virtual Office belum dapat dimuat.')); });
+    return () => { mounted = false; };
+  }, []);
+  if (error) return <p role="alert" className="text-sm text-red-700">{error}</p>;
+  if (!settings) return <p role="status" className="text-sm text-slate-600">Memuat Virtual Office…</p>;
+  if (!settings.published) return <p role="status" className="text-sm text-slate-700">Virtual Office belum ditayangkan.</p>;
+  return <Viewer rooms={settings.rooms ?? {}} />;
 }
 
 export default function VirtualOfficeView({ isAdmin }: { isAdmin: boolean }) {

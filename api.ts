@@ -105,12 +105,17 @@ export const api = {
     if (!response.ok) throw new Error('Daftar mahasiswa dan dosen belum dapat dimuat.');
     return response.json();
   },
+  async virtualOfficePublic(): Promise<VirtualOfficeSettings> {
+    const response = await fetch(`${API_BASE_URL}/virtual-office/public`, { cache: 'no-store', signal: AbortSignal.timeout(15000) });
+    if (!response.ok) throw new Error('Virtual Office belum dapat dimuat.');
+    return response.json();
+  },
+  // Without a login token (login/register page) the public map is used.
   async getVirtualOfficeMap(signal: AbortSignal): Promise<Blob> {
     const token = this.getToken();
-    if (!token) throw new Error('Silakan login kembali.');
-    const response = await fetch(`${API_BASE_URL}/virtual-office/map`, {
+    const response = await fetch(`${API_BASE_URL}/virtual-office/${token ? 'map' : 'public/map'}`, {
       cache: 'no-store', signal: AbortSignal.any([signal, AbortSignal.timeout(15000)]),
-      headers: { Authorization: 'Bearer ' + token }
+      headers: token ? { Authorization: 'Bearer ' + token } : {}
     });
     if (!response.ok) throw new Error('Gambar denah belum dapat dimuat.');
     return response.blob();
