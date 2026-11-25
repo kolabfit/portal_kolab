@@ -4,12 +4,10 @@ import fs from 'node:fs/promises';
 import crypto from 'node:crypto';
 import mysql from 'mysql2/promise';
 import dotenv from 'dotenv';
-import http from 'node:http';
 
 dotenv.config({ path: new URL('../.env', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1'), quiet: true });
 const database = `portal_kolab_test_${crypto.randomBytes(6).toString('hex')}`;
-let control, db, server, base, token, studentToken, lecturerToken, provider;
-let migrationData = {}, failProvider = false;
+let control, db, server, base, token, studentToken, lecturerToken;
 const password = 'Persistence-test-123!';
 async function request(path, body, bearer = token, expected = 200) {
   const response = await fetch(base + path, { method: body ? 'POST' : 'GET', headers: { 'Content-Type': 'application/json', Connection: 'close', ...(bearer ? { Authorization: `Bearer ${bearer}` } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) });
@@ -232,14 +230,6 @@ before(async () => {
   process.env.KROOMBOX_CDN_JWT = '';
   process.env.KROOMBOX_CDN_SYNC_ENABLED = 'false';
   process.env.JWT_SECRET = crypto.randomBytes(32).toString('hex');
-  provider = http.createServer((req, res) => {
-    res.setHeader('Content-Type', 'application/json');
-    const action = new URL(req.url, 'http://localhost').searchParams.get('action');
-    if (failProvider) { res.end(JSON.stringify({ status: 'error', message: 'Provider unavailable' })); return; }
-    res.end(JSON.stringify(req.method === 'GET' ? (migrationData[action] ?? (action === 'getAssets' ? {} : [])) : { status: 'success', url: 'https://meet.example/test' }));
-  }).listen(0, '127.0.0.1');
-  await new Promise(resolve => provider.once('listening', resolve));
-  process.env.GAS_URL = `http://127.0.0.1:${provider.address().port}`;
   const app = (await import('../server.js')).default;
   db = (await import('../lib/db.js')).default;
   await (await import('../scripts/migrate.js')).migrate();
@@ -252,7 +242,6 @@ before(async () => {
 });
 after(async () => {
   if (server) await new Promise(resolve => server.close(resolve));
-  if (provider) await new Promise(resolve => provider.close(resolve));
   if (db) await db.end();
   if (control) {
     // Only the random database created by this test may be removed.
@@ -696,41 +685,9 @@ test('partial edits preserve data; missing records and invalid quotas are reject
   assert.equal((await request('/data/assets')).logoUrl, 'new-logo');
 });
 
-test('Google Meet integration responses persist in MySQL (local provider stub)', async () => {
-  await bridge('generateMeetLink', { title: 'Meeting', startTime: '2026-09-17T10:00:00', description: 'Test' });
-  await bridge('autoInviteToMeet', { meetLink: 'https://meet.example/test', email: 'test@example.invalid' });
-  const [rows] = await db.query('SELECT * FROM integration_results ORDER BY action');
-  assert.equal(rows.length, 2);
-  assert.equal(JSON.parse(rows[0].response_data).url, 'https://meet.example/test');
-  failProvider = true;
-  try { await bridge('generateMeetLink', { title: 'Failure' }, token, 502); }
-  finally { failProvider = false; }
-  const [[count]] = await db.query('SELECT COUNT(*) AS count FROM integration_results');
-  assert.equal(count.count, 2);
-});
-
-test('migration imports all collections and rolls back invalid data (local provider stub)', async () => {
-  migrationData = {
-    getAssets: { logoUrl: 'imported-logo', yPlaylists: [{ playlistId: 'import-playlist', title: 'Import' }], tvChannels: [{ id: 'import-tv', title: 'Import', videoId: 'import-video' }] },
-    getAnnouncements: [{ id: 'import-ann', author: 'Import', title: 'Import', content: 'Text', createdAt: '2026-09-17T00:00:00Z', target: { type: 'ALL', value: '' } }]
-  };
-  for (const [, endpoint, , data] of fixtures) {
-    const action = { startups: 'getStartups', informasi: 'getInformasi', schedules: 'getSchedules', events: 'getEvents', categories: 'getCategories', tags: 'getTags', articles: 'getArticles' }[endpoint];
-    migrationData[action] = [{ ...data, id: 'import-' + endpoint }];
-  }
-  await request('/migration/pull', { gasUrl: process.env.GAS_URL });
-  assert.equal((await request('/data/assets')).logoUrl, 'imported-logo');
-  assert.equal((await request('/data/assets')).tvChannels[0].videoId, 'import-video');
-  for (const [, endpoint] of fixtures) assert.equal((await request('/data/' + endpoint))[0].id, 'import-' + endpoint);
-  assert.equal((await request('/data/announcements'))[0].target.type, 'ALL');
-  // Re-import updates the same rows rather than duplicating them.
-  await request('/migration/pull', { gasUrl: process.env.GAS_URL });
-  assert.equal((await request('/data/articles')).length, 1);
-  migrationData.getAssets.logoUrl = 'must-rollback';
-  migrationData.getArticles = [{ id: 'invalid', title: null }];
-  await request('/migration/pull', { gasUrl: process.env.GAS_URL }, token, 502);
-  assert.equal((await request('/data/assets')).logoUrl, 'imported-logo');
-  assert.equal((await request('/data/articles')).length, 1);
+test('Google Apps Script actions are gone from the bridge and API', async () => {
+  for (const action of ['generateMeetLink', 'autoInviteToMeet']) await bridge(action, {}, token, 400);
+  assert.equal((await fetch(base + '/migration/pull', { method: 'POST', headers: { Authorization: `Bearer ${token}` } })).status, 404);
 });
 
 test('internships: admin CRUD, validation, authorization, overlap and atomic audit', async t => {

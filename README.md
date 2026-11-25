@@ -109,18 +109,15 @@ Database aplikasi tidak digunakan sebagai tempat menulis fixture.
 
 Cakupan test: CRUD semua koleksi portal, profil tiga peran, perubahan password,
 kuota, upload/download byte file, folder bertingkat, copy/rename/delete, penolakan
-akses, pembacaan setelah restart API, rollback, dan migrasi yang dapat diulang.
-Google Meet dan sumber migrasi menggunakan server simulasi lokal saat test;
-pengujian tidak mengirim undangan atau menghubungi layanan Google sebenarnya.
+akses, pembacaan setelah restart API, rollback, dan migrasi skema yang dapat diulang.
 
-`/api/migration/pull` sekarang melakukan upsert semua koleksi yang didukung dalam
-satu transaksi. File lama yang masih berupa URL eksternal tetap berupa referensi;
-endpoint ini tidak menyalin isi file lama dari Drive. `uploadFile` dan operasi
-repository baru tidak memakai GAS. Google Meet masih memerlukan `GAS_URL` yang
-mendukung aksi tersebut. Hasil integrasi Meet dan hasil AI yang berhasil disimpan
-ke `integration_results`; generasi AI langsung belum dicakup pengujian provider.
+Semua data portal sudah berada di MySQL, sehingga portal tidak lagi memakai Google
+Apps Script (GAS). Endpoint `/api/migration/pull` dan variabel `GAS_URL` sudah
+dihapus. Link Google Meet untuk event online ditempel manual oleh admin, dan
+tombol bergabung langsung membuka link tersebut. Hasil AI yang berhasil tetap
+disimpan ke `integration_results`; generasi AI langsung belum dicakup pengujian provider.
 
-Operasi tulis bridge, photobooth, migrasi, dan AI memerlukan token Bearer.
+Operasi tulis bridge, photobooth, dan AI memerlukan token Bearer.
 Pengaturan global dan pengelolaan anggota memerlukan peran ADMIN. URL file bersifat
 shareable dan menggunakan ID acak, sesuai fungsi preview/download portal.
 
