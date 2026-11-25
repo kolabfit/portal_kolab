@@ -493,8 +493,8 @@ test('member administration persists identity, password, quota and deletion', as
 const fixtures = [
   ['manageStartup', 'startups', 'startup_teams', { name: 'Startup', website: 'web', ig: 'ig', tiktok: 'tiktok', linkedin: 'linkedin', logoUrl: 'logo' }, 'name'],
   ['manageInformasi', 'informasi', 'information', { title: 'Info', date: '2026-09-17T10:30:00.000Z', description: 'Info body', author: 'Admin', targetType: 'STARTUP_SPECIFIC', targetValue: 'startup' }, 'title'],
-  ['manageSchedule', 'schedules', 'schedules', { title: 'Meeting', date: '2026-09-17', time: '10:30', endTime: '11:30', locationOffline: 'Lab', locationOnline: true, meetLink: 'https://meet.example', organizer: 'Administrator', description: 'Body', author: 'Admin' }, 'title'],
-  ['manageEvent', 'events', 'events', { title: 'Event', date: '2026-09-17', time: '10:30', image: 'image', description: 'Body', locationOffline: 'Lab', locationOnline: 'Yes', maxParticipants: 20, status: 'OPEN', tags: ['tag,with comma', 'two'], meetLink: 'meet', author: 'Admin' }, 'title'],
+  ['manageSchedule', 'schedules', 'schedules', { title: 'Meeting', date: '2026-09-17', time: '10:30', endTime: '11:30', locationOffline: 'Lab', locationOnline: true, meetLink: 'https://meet.google.com/abc-defg-hij', organizer: 'Administrator', description: 'Body', author: 'Admin' }, 'title'],
+  ['manageEvent', 'events', 'events', { title: 'Event', date: '2026-09-17', time: '10:30', image: 'image', description: 'Body', locationOffline: 'Lab', locationOnline: 'Yes', maxParticipants: 20, status: 'OPEN', tags: ['tag,with comma', 'two'], meetLink: 'https://zoom.us/j/123456789', author: 'Admin' }, 'title'],
   ['manageCategory', 'categories', 'article_categories', { name: 'Category' }, 'name'],
   ['manageTag', 'tags', 'article_tags', { name: 'Tag Artikel' }, 'name'],
   ['manageArticle', 'articles', 'articles', { title: 'Article', date: '2026-09-17', content: '<p>Konten</p>', author: 'Admin', tags: ['tag,with comma', 'two'], categoryId: 'category', imageUrl: 'image', videoUrl: 'video', otherUrl: 'other' }, 'title']
@@ -518,6 +518,24 @@ for (const [action, endpoint, table, data, property] of fixtures) {
     assert.equal(await read(), undefined);
   });
 }
+
+test('manageSchedule and manageEvent: online meetings need a Google Meet or Zoom link', async () => {
+  const base = { title: 'Online', date: '2026-09-17', time: '10:30', organizer: 'Administrator', description: '' };
+  await bridge('manageSchedule', { type: 'add', data: { ...base, locationOnline: true, meetLink: 'https://evil.example/j/1' } }, token, 400);
+  await bridge('manageSchedule', { type: 'add', data: { ...base, locationOnline: true } }, token, 400);
+  const zoom = await bridge('manageSchedule', { type: 'add', data: { ...base, locationOnline: 'on', meetLink: ' https://us02web.zoom.us/j/123456789 ' } });
+  const find = () => request('/data/schedules').then(rows => rows.find(row => row.id === zoom.id));
+  assert.deepEqual([(await find()).locationOnline, (await find()).meetLink], [true, 'https://us02web.zoom.us/j/123456789']);
+  await bridge('manageSchedule', { type: 'edit', id: zoom.id, data: { ...base, locationOnline: false, locationOffline: 'Lab', meetLink: 'https://meet.google.com/abc-defg-hij' } });
+  assert.deepEqual([(await find()).locationOnline, (await find()).meetLink], [false, '']);
+  await bridge('manageSchedule', { type: 'delete', id: zoom.id });
+  const event = { title: 'Webinar', date: '2026-09-17', time: '10:30', locationOnline: 'Yes', status: 'OPEN', tags: [] };
+  await bridge('manageEvent', { type: 'add', data: { ...event, meetLink: 'https://meet.google.com.evil.com/abc' } }, token, 400);
+  const webinar = await bridge('manageEvent', { type: 'add', data: { ...event, meetLink: 'https://meet.google.com/abc-defg-hij' } });
+  await bridge('manageEvent', { type: 'edit', id: webinar.id, data: { ...event, locationOnline: 'No', meetLink: 'https://meet.google.com/abc-defg-hij' } });
+  assert.equal((await request('/data/events')).find(row => row.id === webinar.id).meetLink, '');
+  await bridge('manageEvent', { type: 'delete', id: webinar.id });
+});
 
 test('assets, streaming playlists and TV persist without field loss', async () => {
   const assets = { bgFront: 'front', bgBack: 'back', logoUrl: 'logo', studentPolicy: { defaultQuota: 1000000, maxUploadSize: 500000, allowedCategories: ['document', 'image'] }, lecturerPolicy: { defaultQuota: 2000000 }, adminYoutube: 'yt', adminSpotify: 'sp' };

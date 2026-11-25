@@ -2,9 +2,24 @@
 import React, { useState, useMemo } from 'react';
 import { 
   Plus, MapPin, Calendar as CalendarIcon, 
-  ChevronLeft, ChevronRight, Clock, Search, X, Save, Edit2, Trash2, User, Eye, FileText, RefreshCw
+  ChevronLeft, ChevronRight, Clock, Search, X, Save, Edit2, Trash2, User, Eye, FileText, RefreshCw, Video
 } from 'lucide-react';
 import { Schedule, UserRole } from '../types';
+import { parseMeetingLink } from '../api/lib/meetingLinks.js';
+
+// Older entries kept the meeting URL in the location field.
+const joinLinkOf = (m: Schedule) => parseMeetingLink(m.meetLink) || parseMeetingLink(m.locationOffline);
+
+const JoinButton: React.FC<{ meeting: Schedule; large?: boolean }> = ({ meeting, large }) => {
+  const link = joinLinkOf(meeting);
+  if (!link) return null;
+  return (
+    <a href={link.url} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()}
+      className={`inline-flex items-center justify-center gap-2 bg-emerald-600 text-white font-black uppercase tracking-widest hover:bg-emerald-700 transition-all shadow-sm ${large ? 'px-8 py-4 rounded-2xl text-xs' : 'px-4 py-2.5 rounded-xl text-[9px]'}`}>
+      <Video size={large ? 18 : 14} /> Gabung {link.label}
+    </a>
+  );
+};
 
 interface MeetingsViewProps {
   meetings: Schedule[];
@@ -24,6 +39,17 @@ const MeetingsView: React.FC<MeetingsViewProps> = ({ meetings, isAdmin, currentU
   const [previewItem, setPreviewItem] = useState<Schedule | null>(null);
   const [filterText, setFilterText] = useState('');
   const [isSyncing, setIsSyncing] = useState(false);
+  const [isOnline, setIsOnline] = useState(false);
+  const [meetLinkValue, setMeetLinkValue] = useState('');
+  const detectedLink = parseMeetingLink(meetLinkValue);
+
+  const openForm = (item: Schedule | null) => {
+    const legacy = item && !item.meetLink ? parseMeetingLink(item.locationOffline) : null;
+    setEditingItem(item ? { ...item, locationOffline: legacy ? '' : item.locationOffline } : null);
+    setIsOnline(!!item && (!!item.locationOnline || !!legacy));
+    setMeetLinkValue(item ? (item.meetLink || legacy?.url || '') : '');
+    setShowForm(true);
+  };
 
   const handleRefresh = async () => {
     if (!onRefresh) return;
@@ -93,7 +119,10 @@ const MeetingsView: React.FC<MeetingsViewProps> = ({ meetings, isAdmin, currentU
   const handleFormSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const fd = new FormData(e.currentTarget);
-    const data = Object.fromEntries(fd.entries());
+    const data: any = Object.fromEntries(fd.entries());
+    if (isOnline && !detectedLink) return;
+    data.locationOnline = isOnline;
+    data.meetLink = isOnline ? detectedLink!.url : '';
     if (!editingItem) {
       (data as any).author = currentUser;
     } else {
@@ -123,7 +152,7 @@ const MeetingsView: React.FC<MeetingsViewProps> = ({ meetings, isAdmin, currentU
                    Organized by {previewItem.organizer}
                 </span>
                 { (isAdmin || previewItem.author === currentUser) && (
-                   <button onClick={() => { setEditingItem(previewItem); setPreviewItem(null); setShowForm(true); }} className="px-5 py-2 bg-blue-50 text-blue-600 rounded-xl text-[8px] lg:text-[9px] font-black uppercase tracking-widest flex items-center justify-center gap-2 hover:bg-blue-600 hover:text-white transition-all">
+                   <button onClick={() => { openForm(previewItem); setPreviewItem(null); }} className="px-5 py-2 bg-blue-50 text-blue-600 rounded-xl text-[8px] lg:text-[9px] font-black uppercase tracking-widest flex items-center justify-center gap-2 hover:bg-blue-600 hover:text-white transition-all">
                       <Edit2 size={12} /> Edit Schedule
                    </button>
                 )}
@@ -135,8 +164,9 @@ const MeetingsView: React.FC<MeetingsViewProps> = ({ meetings, isAdmin, currentU
              <div className="flex flex-col sm:flex-row flex-wrap gap-4 sm:gap-8 text-slate-400 font-black uppercase tracking-widest text-[10px] lg:text-xs border-y border-slate-50 py-8 lg:py-10">
                 <div className="flex items-center gap-3"><div className="w-8 h-8 lg:w-10 lg:h-10 rounded-lg lg:rounded-xl bg-slate-50 flex items-center justify-center text-orange-600 shrink-0"><CalendarIcon size={16}/></div> {previewItem.date}</div>
                 <div className="flex items-center gap-3"><div className="w-8 h-8 lg:w-10 lg:h-10 rounded-lg lg:rounded-xl bg-slate-50 flex items-center justify-center text-orange-600 shrink-0"><Clock size={16}/></div> {previewItem.time}</div>
-                <div className="flex items-center gap-3"><div className="w-8 h-8 lg:w-10 lg:h-10 rounded-lg lg:rounded-xl bg-slate-50 flex items-center justify-center text-orange-600 shrink-0"><MapPin size={16}/></div> {previewItem.locationOffline || 'TBD'}</div>
+                <div className="flex items-center gap-3"><div className="w-8 h-8 lg:w-10 lg:h-10 rounded-lg lg:rounded-xl bg-slate-50 flex items-center justify-center text-orange-600 shrink-0"><MapPin size={16}/></div> {joinLinkOf(previewItem) ? (previewItem.meetLink ? previewItem.locationOffline || 'Online' : 'Online') : previewItem.locationOffline || 'TBD'}</div>
              </div>
+             <JoinButton meeting={previewItem} large />
           </div>
 
           <div className="space-y-6 lg:space-y-8">
@@ -188,7 +218,7 @@ const MeetingsView: React.FC<MeetingsViewProps> = ({ meetings, isAdmin, currentU
             <input type="text" placeholder="Query..." value={filterText} onChange={(e) => setFilterText(e.target.value)} className="w-full pl-12 pr-5 py-3.5 bg-white rounded-2xl border border-slate-100 shadow-sm outline-none font-bold text-xs focus:ring-4 focus:ring-orange-100 transition-all" />
           </div>
           {(isAdmin || currentUser !== 'GUEST') && (
-            <button onClick={() => { setEditingItem(null); setShowForm(true); }} className="w-full sm:w-auto px-6 py-3.5 bg-orange-600 text-white rounded-[1.2rem] font-black text-[10px] uppercase tracking-widest flex items-center justify-center gap-3 shadow-xl hover:bg-orange-700 transition-all active:scale-95"><Plus size={18} /> Input Schedule</button>
+            <button onClick={() => openForm(null)} className="w-full sm:w-auto px-6 py-3.5 bg-orange-600 text-white rounded-[1.2rem] font-black text-[10px] uppercase tracking-widest flex items-center justify-center gap-3 shadow-xl hover:bg-orange-700 transition-all active:scale-95"><Plus size={18} /> Input Schedule</button>
           )}
         </div>
       </div>
@@ -222,14 +252,15 @@ const MeetingsView: React.FC<MeetingsViewProps> = ({ meetings, isAdmin, currentU
                        <h4 className="text-lg lg:text-xl font-black text-slate-900 group-hover:text-orange-600 transition-colors truncate tracking-tight">{m.title}</h4>
                        <div className="flex flex-wrap items-center gap-4 mt-2 text-[9px] lg:text-[10px] font-black text-slate-400 uppercase tracking-widest">
                           <span className="flex items-center gap-1.5"><Clock size={12} className="text-orange-600" /> {m.time}</span>
-                          <span className="flex items-center gap-1.5"><MapPin size={12} className="text-orange-600" /> {m.locationOffline || 'TBD'}</span>
+                          <span className="flex items-center gap-1.5"><MapPin size={12} className="text-orange-600" /> {joinLinkOf(m) ? (m.meetLink ? m.locationOffline || 'Online' : 'Online') : m.locationOffline || 'TBD'}</span>
                        </div>
                     </div>
-                    <div className="flex gap-2 self-end sm:self-center">
+                    <div className="flex gap-2 self-end sm:self-center items-center">
+                       <JoinButton meeting={m} />
                        <button onClick={() => setPreviewItem(m)} className="p-2.5 text-slate-300 hover:text-orange-600 hover:bg-orange-50 rounded-xl transition-all shadow-sm border border-slate-50"><Eye size={18}/></button>
                        {canManage && (
                          <>
-                           <button onClick={() => { setEditingItem(m); setShowForm(true); }} className="p-2.5 text-slate-300 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-all shadow-sm border border-slate-50"><Edit2 size={18}/></button>
+                           <button onClick={() => openForm(m)} className="p-2.5 text-slate-300 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-all shadow-sm border border-slate-50"><Edit2 size={18}/></button>
                            <button onClick={() => onDelete(m.id)} className="p-2.5 text-slate-300 hover:text-red-600 hover:bg-red-50 rounded-xl transition-all shadow-sm border border-slate-50"><Trash2 size={18}/></button>
                          </>
                        )}
@@ -266,9 +297,22 @@ const MeetingsView: React.FC<MeetingsViewProps> = ({ meetings, isAdmin, currentU
                       </div>
                   </div>
                   <div className="space-y-1">
-                    <label className="text-[9px] font-black text-slate-400 uppercase ml-2">Location / Meet URL</label>
-                    <input name="locationOffline" defaultValue={editingItem?.locationOffline} placeholder="Access node..." className="w-full px-5 py-4 bg-slate-50 rounded-2xl font-bold outline-none border border-transparent focus:border-orange-100 transition-all" />
+                    <label className="text-[9px] font-black text-slate-400 uppercase ml-2">Lokasi offline</label>
+                    <input name="locationOffline" defaultValue={editingItem?.locationOffline} placeholder={isOnline ? 'Opsional, isi jika juga ada ruang offline' : 'Ruang / alamat'} className="w-full px-5 py-4 bg-slate-50 rounded-2xl font-bold outline-none border border-transparent focus:border-orange-100 transition-all" />
                   </div>
+                  <label className="flex items-center gap-3 px-2 cursor-pointer">
+                    <input type="checkbox" checked={isOnline} onChange={e => setIsOnline(e.target.checked)} className="w-4 h-4 accent-emerald-600" />
+                    <span className="text-xs font-black text-slate-700">Meeting online (Google Meet / Zoom)</span>
+                  </label>
+                  {isOnline && (
+                    <div className="space-y-1">
+                      <label htmlFor="schedule-meet-link" className="text-[9px] font-black text-slate-400 uppercase ml-2">Link meeting</label>
+                      <input id="schedule-meet-link" value={meetLinkValue} onChange={e => setMeetLinkValue(e.target.value)} required placeholder="https://meet.google.com/... atau https://zoom.us/j/..." className="w-full px-5 py-4 bg-emerald-50 rounded-2xl font-bold outline-none border border-transparent focus:border-emerald-200 transition-all" />
+                      <p role="status" className={`text-[10px] font-bold ml-2 ${detectedLink ? 'text-emerald-600' : 'text-rose-500'}`}>
+                        {detectedLink ? `Terdeteksi: ${detectedLink.label}` : meetLinkValue ? 'Hanya link Google Meet atau Zoom yang diterima.' : 'Tempel link Google Meet atau Zoom.'}
+                      </p>
+                    </div>
+                  )}
                   <div className="space-y-1">
                     <label className="text-[9px] font-black text-slate-400 uppercase ml-2">Organizer</label>
                     <input name="organizer" defaultValue={editingItem?.organizer || (isAdmin ? 'Administrator' : currentUser)} required className="w-full px-5 py-4 bg-slate-50 rounded-2xl font-bold outline-none border border-transparent focus:border-orange-100 transition-all" placeholder="Source identifier..." />
@@ -278,7 +322,7 @@ const MeetingsView: React.FC<MeetingsViewProps> = ({ meetings, isAdmin, currentU
                     <textarea name="description" defaultValue={editingItem?.description} placeholder="Protocol details..." rows={3} className="w-full px-5 py-4 bg-slate-50 rounded-2xl font-bold outline-none resize-none border border-transparent focus:border-orange-100 transition-all" />
                   </div>
                 </div>
-                <button type="submit" className="w-full py-5 bg-slate-900 text-white rounded-2xl font-black uppercase text-[10px] tracking-[0.2em] shadow-xl flex items-center justify-center gap-3 active:scale-95 transition-all hover:bg-black"><Save size={18} /> Commit Changes</button>
+                <button type="submit" disabled={isOnline && !detectedLink} className="w-full py-5 bg-slate-900 text-white rounded-2xl font-black uppercase text-[10px] tracking-[0.2em] shadow-xl flex items-center justify-center gap-3 active:scale-95 transition-all hover:bg-black disabled:opacity-40 disabled:cursor-not-allowed"><Save size={18} /> Commit Changes</button>
              </form>
           </div>
         </div>
