@@ -1,23 +1,52 @@
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
   Plus, MapPin, Calendar as CalendarIcon, 
-  ChevronLeft, ChevronRight, Clock, Search, X, Save, Edit2, Trash2, User, Eye, FileText, RefreshCw, Video
+  ChevronLeft, ChevronRight, Clock, Search, X, Save, Edit2, Trash2, User, Eye, FileText, RefreshCw, Video, Users
 } from 'lucide-react';
 import { Schedule, UserRole } from '../types';
-import { parseMeetingLink } from '../api/lib/meetingLinks.js';
+import { parseMeetingLink, meetingPhase } from '../api/lib/meetingLinks.js';
+import { api } from '../api';
+
+type Join = { name: string; role: string; joinedAt: string };
+const hhmm = (d: Date) => d.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
 
 // Older entries kept the meeting URL in the location field.
 const joinLinkOf = (m: Schedule) => parseMeetingLink(m.meetLink) || parseMeetingLink(m.locationOffline);
 
-const JoinButton: React.FC<{ meeting: Schedule; large?: boolean }> = ({ meeting, large }) => {
+const JoinButton: React.FC<{ meeting: Schedule; large?: boolean; onJoined?: (joins: Join[]) => void }> = ({ meeting, large, onJoined }) => {
   const link = joinLinkOf(meeting);
   if (!link) return null;
+  // The link opens normally (no popup blocker); the join is recorded alongside it.
+  const record = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    api.postData('joinSchedule', { id: meeting.id }).then((res: any) => res?.joins && onJoined?.(res.joins)).catch(() => {});
+  };
   return (
-    <a href={link.url} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()}
+    <a href={link.url} target="_blank" rel="noopener noreferrer" onClick={record}
       className={`inline-flex items-center justify-center gap-2 bg-emerald-600 text-white font-black uppercase tracking-widest hover:bg-emerald-700 transition-all shadow-sm ${large ? 'px-8 py-4 rounded-2xl text-xs' : 'px-4 py-2.5 rounded-xl text-[9px]'}`}>
       <Video size={large ? 18 : 14} /> Gabung {link.label}
     </a>
+  );
+};
+
+// Status from the schedule time plus joins made through the portal's Gabung button. Meet and Zoom do not
+// report participants for a plain link, so "Online" means someone joined from the portal.
+const MeetingStatus: React.FC<{ meeting: Schedule; now: Date; joins: number }> = ({ meeting, now, joins }) => {
+  const info = joinLinkOf(meeting) ? meetingPhase(meeting, now) : null;
+  if (!info) return null;
+  const [label, tone] = info.phase === 'UPCOMING'
+    ? [`Akan datang · mulai ${hhmm(info.start)}`, 'bg-slate-100 text-slate-500']
+    : info.phase === 'ENDED'
+      ? [`Selesai · ${joins} orang masuk lewat portal`, 'bg-slate-100 text-slate-400']
+      : joins > 0
+        ? [`Online · ${joins} orang sudah masuk`, 'bg-emerald-100 text-emerald-700']
+        : ['Sedang berlangsung · belum ada yang masuk', 'bg-amber-100 text-amber-700'];
+  return (
+    <span className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest ${tone}`}>
+      <span className={`w-2 h-2 rounded-full ${info.phase === 'LIVE' ? (joins > 0 ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500 animate-pulse') : 'bg-slate-300'}`} />
+      {label}
+    </span>
   );
 };
 
@@ -40,6 +69,31 @@ const MeetingsView: React.FC<MeetingsViewProps> = ({ meetings, isAdmin, currentU
   const [filterText, setFilterText] = useState('');
   const [isSyncing, setIsSyncing] = useState(false);
   const [isOnline, setIsOnline] = useState(false);
+  const [now, setNow] = useState(() => new Date());
+  const [previewJoins, setPreviewJoins] = useState<Join[]>([]);
+  const [joinCounts, setJoinCounts] = useState<Record<string, number>>({});
+  const joinsOf = (m: Schedule) => joinCounts[m.id] ?? m.joinCount ?? 0;
+  const noteJoins = (m: Schedule) => (joins: Join[]) => {
+    setJoinCounts(counts => ({ ...counts, [m.id]: joins.length }));
+    if (previewItem?.id === m.id) setPreviewJoins(joins);
+  };
+
+  useEffect(() => {
+    const timer = setInterval(() => setNow(new Date()), 30000);
+    return () => clearInterval(timer);
+  }, []);
+
+  // The detail view lists who joined, refreshed every 30 seconds while it is open.
+  useEffect(() => {
+    if (!previewItem || !joinLinkOf(previewItem)) { setPreviewJoins([]); return; }
+    let active = true;
+    const load = () => api.postData('getScheduleJoins', { id: previewItem.id }).then((res: any) => {
+      if (active && res?.joins) { setPreviewJoins(res.joins); setJoinCounts(counts => ({ ...counts, [previewItem.id]: res.joins.length })); }
+    }).catch(() => {});
+    load();
+    const timer = setInterval(load, 30000);
+    return () => { active = false; clearInterval(timer); };
+  }, [previewItem]);
   const [meetLinkValue, setMeetLinkValue] = useState('');
   const detectedLink = parseMeetingLink(meetLinkValue);
 
@@ -166,7 +220,19 @@ const MeetingsView: React.FC<MeetingsViewProps> = ({ meetings, isAdmin, currentU
                 <div className="flex items-center gap-3"><div className="w-8 h-8 lg:w-10 lg:h-10 rounded-lg lg:rounded-xl bg-slate-50 flex items-center justify-center text-orange-600 shrink-0"><Clock size={16}/></div> {previewItem.time}</div>
                 <div className="flex items-center gap-3"><div className="w-8 h-8 lg:w-10 lg:h-10 rounded-lg lg:rounded-xl bg-slate-50 flex items-center justify-center text-orange-600 shrink-0"><MapPin size={16}/></div> {joinLinkOf(previewItem) ? (previewItem.meetLink ? previewItem.locationOffline || 'Online' : 'Online') : previewItem.locationOffline || 'TBD'}</div>
              </div>
-             <JoinButton meeting={previewItem} large />
+             <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+               <JoinButton meeting={previewItem} large onJoined={noteJoins(previewItem)} />
+               <MeetingStatus meeting={previewItem} now={now} joins={joinsOf(previewItem)} />
+             </div>
+             {joinLinkOf(previewItem) && (
+               <div className="bg-slate-50 rounded-2xl p-5 space-y-3">
+                 <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-slate-500"><Users size={14} className="text-emerald-600" /> Masuk lewat portal ({previewJoins.length})</div>
+                 {previewJoins.length === 0
+                   ? <p className="text-xs font-bold text-slate-400">Belum ada yang masuk lewat tombol Gabung.</p>
+                   : <ul className="flex flex-wrap gap-2">{previewJoins.map(j => <li key={j.name + j.joinedAt} className="px-3 py-1.5 bg-white rounded-xl border border-slate-100 text-xs font-bold text-slate-700">{j.name} <span className="text-slate-400">· {hhmm(new Date(j.joinedAt))}</span></li>)}</ul>}
+                 <p className="text-[10px] font-bold text-slate-400">Hanya yang masuk lewat tombol Gabung di portal yang tercatat. Yang membuka link langsung di Google Meet atau Zoom tidak terlihat.</p>
+               </div>
+             )}
           </div>
 
           <div className="space-y-6 lg:space-y-8">
@@ -252,11 +318,12 @@ const MeetingsView: React.FC<MeetingsViewProps> = ({ meetings, isAdmin, currentU
                        <h4 className="text-lg lg:text-xl font-black text-slate-900 group-hover:text-orange-600 transition-colors truncate tracking-tight">{m.title}</h4>
                        <div className="flex flex-wrap items-center gap-4 mt-2 text-[9px] lg:text-[10px] font-black text-slate-400 uppercase tracking-widest">
                           <span className="flex items-center gap-1.5"><Clock size={12} className="text-orange-600" /> {m.time}</span>
+                          <MeetingStatus meeting={m} now={now} joins={joinsOf(m)} />
                           <span className="flex items-center gap-1.5"><MapPin size={12} className="text-orange-600" /> {joinLinkOf(m) ? (m.meetLink ? m.locationOffline || 'Online' : 'Online') : m.locationOffline || 'TBD'}</span>
                        </div>
                     </div>
                     <div className="flex gap-2 self-end sm:self-center items-center">
-                       <JoinButton meeting={m} />
+                       <JoinButton meeting={m} onJoined={noteJoins(m)} />
                        <button onClick={() => setPreviewItem(m)} className="p-2.5 text-slate-300 hover:text-orange-600 hover:bg-orange-50 rounded-xl transition-all shadow-sm border border-slate-50"><Eye size={18}/></button>
                        {canManage && (
                          <>
@@ -295,6 +362,10 @@ const MeetingsView: React.FC<MeetingsViewProps> = ({ meetings, isAdmin, currentU
                         <label className="text-[9px] font-black text-slate-400 uppercase ml-2">Time</label>
                         <input name="time" type="time" defaultValue={editingItem?.time} required className="w-full px-5 py-4 bg-slate-50 rounded-2xl font-bold outline-none border border-transparent focus:border-orange-100 transition-all" />
                       </div>
+                  </div>
+                  <div className="space-y-1">
+                    <label htmlFor="schedule-end-time" className="text-[9px] font-black text-slate-400 uppercase ml-2">Jam selesai (opsional, bawaan 2 jam)</label>
+                    <input id="schedule-end-time" name="endTime" type="time" defaultValue={editingItem?.endTime || ''} className="w-full px-5 py-4 bg-slate-50 rounded-2xl font-bold outline-none border border-transparent focus:border-orange-100 transition-all" />
                   </div>
                   <div className="space-y-1">
                     <label className="text-[9px] font-black text-slate-400 uppercase ml-2">Lokasi offline</label>

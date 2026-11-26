@@ -183,6 +183,7 @@ export interface Schedule {
   organizer: string;
   description: string;
   author?: string;
+  joinCount?: number;
 }
 
 export interface Event {

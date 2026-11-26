@@ -535,7 +535,23 @@ test('manageSchedule and manageEvent: online meetings need a Google Meet or Zoom
   assert.deepEqual([(await find()).locationOnline, (await find()).meetLink], [true, 'https://us02web.zoom.us/j/123456789']);
   await bridge('manageSchedule', { type: 'edit', id: zoom.id, data: { ...base, locationOnline: false, locationOffline: 'Lab', meetLink: 'https://meet.google.com/abc-defg-hij' } });
   assert.deepEqual([(await find()).locationOnline, (await find()).meetLink], [false, '']);
+  // Joins through the portal are counted once per member; offline schedules cannot be joined.
+  await bridge('joinSchedule', { id: zoom.id }, studentToken, 400);
+  await bridge('manageSchedule', { type: 'edit', id: zoom.id, data: { ...base, locationOnline: true, meetLink: 'https://zoom.us/j/123456789' } });
+  await bridge('joinSchedule', { id: zoom.id }, studentToken);
+  await bridge('joinSchedule', { id: zoom.id }, studentToken);
+  const joined = await bridge('joinSchedule', { id: zoom.id }, lecturerToken);
+  assert.equal(joined.joins.length, 2);
+  assert.deepEqual((await bridge('getScheduleJoins', { id: zoom.id }, studentToken)).joins.map(j => j.role).sort(), ['LECTURER', 'STUDENT']);
+  assert.equal((await find()).joinCount, 2);
+  // Older schedules with the URL in the location field can be joined too.
+  const legacy = await bridge('manageSchedule', { type: 'add', data: { ...base, locationOffline: 'https://meet.google.com/abc-defg-hij' } });
+  assert.equal((await bridge('joinSchedule', { id: legacy.id }, studentToken)).joins.length, 1);
+  await bridge('manageSchedule', { type: 'delete', id: legacy.id });
+  await bridge('joinSchedule', { id: 'missing' }, studentToken, 404);
   await bridge('manageSchedule', { type: 'delete', id: zoom.id });
+  const [[left]] = await db.execute('SELECT COUNT(*) AS n FROM schedule_joins WHERE schedule_id IN (?, ?)', [zoom.id, legacy.id]);
+  assert.equal(left.n, 0);
   const event = { title: 'Webinar', date: '2026-09-17', time: '10:30', locationOnline: 'Yes', status: 'OPEN', tags: [] };
   await bridge('manageEvent', { type: 'add', data: { ...event, meetLink: 'https://meet.google.com.evil.com/abc' } }, token, 400);
   const webinar = await bridge('manageEvent', { type: 'add', data: { ...event, meetLink: 'https://meet.google.com/abc-defg-hij' } });

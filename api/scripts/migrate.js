@@ -4,6 +4,7 @@ import { internshipsSchema } from '../lib/internships.js';
 import { migrateFacilityInventory } from '../lib/facilityInventory.js';
 import { migrateVirtualOffice } from '../lib/virtualOffice.js';
 import { migrateStreaming } from '../lib/streaming.js';
+import { migrateScheduleJoins } from '../lib/scheduleJoins.js';
 
 export async function migrate() {
   await migrateStartupPosition(db);
@@ -11,6 +12,7 @@ export async function migrate() {
   await migrateFacilityInventory(db);
   await migrateVirtualOffice(db);
   await migrateStreaming(db);
+  await migrateScheduleJoins(db);
   await db.execute(`CREATE TABLE IF NOT EXISTS workloads (
     id VARCHAR(50) PRIMARY KEY, name VARCHAR(255) NOT NULL, category VARCHAR(30) NOT NULL,
     description TEXT, start_date DATE, end_date DATE, status VARCHAR(30) NOT NULL DEFAULT 'PLANNED',

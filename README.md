@@ -171,3 +171,11 @@ Input playlist di Profil dan Settings sudah dihapus. Hanya link YouTube dan Spot
 ## Meeting online di Schedule dan Event
 
 Centang **Meeting online** di form Schedule, atau pilih **Digital Stream** di form Event, lalu tempel link Google Meet (`https://meet.google.com/...`) atau Zoom (`https://...zoom.us/j/...`). Form langsung menunjukkan platform yang terdeteksi. Peserta membuka meeting lewat tombol **Gabung Google Meet** atau **Gabung Zoom**. API hanya menerima link `https` dari kedua layanan itu (`api/lib/meetingLinks.js`) dan mengosongkan link saat acara diubah menjadi offline. Jadwal lama yang menaruh URL meet di kolom lokasi tetap mendapat tombol Gabung.
+
+Setiap jadwal online menampilkan status:
+- **Akan datang**: lebih dari 10 menit sebelum jam mulai.
+- **Sedang berlangsung · belum ada yang masuk** (kuning): sejak 10 menit sebelum mulai sampai jam selesai, selama belum ada yang menekan Gabung. Kalau jam selesai kosong, jadwal dianggap berlangsung 2 jam.
+- **Online · N orang sudah masuk** (hijau): sudah ada anggota yang menekan **Gabung**.
+- **Selesai**: setelah jam selesai.
+
+Halaman detail menampilkan siapa saja yang masuk lewat portal beserta jamnya, dan diperbarui tiap 30 detik. Google Meet dan Zoom tidak memberi data peserta untuk link biasa. Karena itu yang tercatat hanya yang masuk lewat tombol **Gabung** di portal (tabel `schedule_joins`). Orang yang membuka link langsung di aplikasi Meet atau Zoom tidak terlihat.

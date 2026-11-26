@@ -10,6 +10,7 @@ import { saveArticleRelations } from '../lib/articleRelations.js';
 import { validateArticleContent } from '../lib/articleHtml.js';
 import { manageStreamingItem, listStreamingItems } from '../lib/streaming.js';
 import { parseMeetingLink } from '../lib/meetingLinks.js';
+import { joinSchedule, listScheduleJoins } from '../lib/scheduleJoins.js';
 
 const isOnline = value => [true, 1, 'true', 'Yes', 'on'].includes(value);
 // Online schedules/events must carry a Google Meet or Zoom link; offline ones carry none.
@@ -46,7 +47,7 @@ router.post('/', requireSession, async (req, res) => {
     db = await pool.getConnection();
     await db.beginTransaction();
     const success = async result => {
-      if (!['getStudents', 'getLecturers', 'getStreamingItems'].includes(action)) {
+      if (!['getStudents', 'getLecturers', 'getStreamingItems', 'getScheduleJoins'].includes(action)) {
         await db.execute('INSERT INTO system_logs (timestamp,action,user_id,details) VALUES (NOW(),?,?,?)', [action, req.user.id, JSON.stringify({
           id: id || payload.targetId || null,
           type,
@@ -65,6 +66,8 @@ router.post('/', requireSession, async (req, res) => {
     }
     if (action === 'getStreamingItems') return await success(await listStreamingItems(db, req.user));
     if (action === 'manageStreamingItem') return await success(await manageStreamingItem(db, req.user, payload));
+    if (action === 'joinSchedule') return await success(await joinSchedule(db, req.user, payload.id));
+    if (action === 'getScheduleJoins') return await success({ status: 'success', joins: await listScheduleJoins(db, payload.id) });
     const collection = { manageStartup: 'startup_teams', manageInformasi: 'information', manageSchedule: 'schedules', scheduleAction: 'schedules', manageEvent: 'events', eventAction: 'events', manageArticle: 'articles', articleAction: 'articles', manageCategory: 'article_categories', manageTag: 'article_tags' }[action];
     if (collection) {
       if (!['add', 'edit', 'delete'].includes(type)) throw Object.assign(new Error('Operasi tidak valid.'), { status: 400 });
@@ -423,6 +426,7 @@ router.post('/', requireSession, async (req, res) => {
       case 'scheduleAction':
         if (type === 'delete') {
           await db.execute('DELETE FROM schedules WHERE id=?', [id]);
+          await db.execute('DELETE FROM schedule_joins WHERE schedule_id=?', [id]);
           return await success({ status: 'success', id });
         }
         data.locationOnline = isOnline(data.locationOnline);

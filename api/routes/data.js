@@ -113,8 +113,8 @@ router.get('/informasi', async (req, res) => {
 // Schedules
 router.get('/schedules', async (req, res) => {
   try {
-    const [rows] = await db.execute('SELECT * FROM schedules');
-    res.json(rows.map(r => ({ ...record(r), locationOnline: !!r.location_online }))); 
+    const [rows] = await db.execute('SELECT s.*, (SELECT COUNT(*) FROM schedule_joins j WHERE j.schedule_id=s.id) AS join_count FROM schedules s');
+    res.json(rows.map(r => ({ ...record(r), locationOnline: !!r.location_online, joinCount: Number(r.join_count) })));
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
